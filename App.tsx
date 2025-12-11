@@ -58,11 +58,18 @@ const PasswordModal = ({ title, onConfirm, onCancel }: { title: string, onConfir
     );
 };
 
-// --- DATABASE SETUP MODAL (NEW) ---
+// --- DATABASE SETUP MODAL (UPDATED) ---
 const DatabaseSetupModal = ({ onClose }: { onClose: () => void }) => {
     const [key, setKey] = useState('');
-    // Default URL from previous context, user just needs Key
-    const [url, setUrl] = useState('https://wqjczpsdrpcmbaaubxal.supabase.co');
+    const [url, setUrl] = useState('');
+
+    useEffect(() => {
+        // Load existing values if any
+        const storedUrl = localStorage.getItem('bakso_ujo_url');
+        const storedKey = localStorage.getItem('bakso_ujo_anon_key');
+        if (storedUrl) setUrl(storedUrl);
+        if (storedKey) setKey(storedKey);
+    }, []);
 
     const handleSave = (e: React.FormEvent) => {
         e.preventDefault();
@@ -79,8 +86,8 @@ const DatabaseSetupModal = ({ onClose }: { onClose: () => void }) => {
                 </div>
                 
                 <p className="text-sm text-gray-600 mb-4 bg-blue-50 p-3 rounded border border-blue-100">
-                    Agar aplikasi bisa online, masukkan <b>Anon Public Key</b> dari Dashboard Supabase Anda.<br/>
-                    (Menu: Settings &rarr; API &rarr; Project API Keys)
+                    Masukkan <b>Project URL</b> dan <b>Anon Public Key</b> dari Dashboard Supabase Anda.<br/>
+                    (Menu: Settings &rarr; API)
                 </p>
 
                 <form onSubmit={handleSave} className="space-y-4">
@@ -90,8 +97,9 @@ const DatabaseSetupModal = ({ onClose }: { onClose: () => void }) => {
                             type="text" 
                             value={url} 
                             onChange={(e) => setUrl(e.target.value)}
-                            className="w-full border rounded p-2 text-sm bg-gray-100 text-gray-600 cursor-not-allowed"
-                            readOnly 
+                            className="w-full border rounded p-2 text-sm bg-white focus:ring-2 focus:ring-orange-500 outline-none"
+                            placeholder="https://xxxxxxxxxxxx.supabase.co"
+                            required
                         />
                     </div>
                     <div>
@@ -150,7 +158,7 @@ const LandingPage = ({ onSelectMode, storeName, logo, slogan, onOpenDbSetup }: {
                  <div className="flex items-center gap-2 text-green-200 text-xs bg-green-900/30 px-3 py-1 rounded-full backdrop-blur-sm">
                     <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></span>
                     Online Database
-                    {hasSavedCredentials() && <button onClick={clearCredentials} className="ml-2 hover:text-white underline" title="Logout DB">X</button>}
+                    <button onClick={onOpenDbSetup} className="ml-2 hover:text-white underline" title="Ubah Koneksi">Setting</button>
                  </div>
             ) : (
                 <button 
