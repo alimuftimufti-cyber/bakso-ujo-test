@@ -4,8 +4,8 @@ import { createClient } from '@supabase/supabase-js';
 // PENTING: Agar "Langsung Online Semua", Boss harus mengisi 2 baris di bawah ini 
 // dengan URL dan KEY yang benar dari Komputer 1 (Lihat menu Setting Database).
 
-const HARDCODED_URL = ''; // <--- MASUKKAN URL DI SINI (Contoh: 'https://xyz.supabase.co')
-const HARDCODED_KEY = ''; // <--- MASUKKAN KEY DI SINI (Contoh: 'eyJhb...')
+const HARDCODED_URL = 'https://wqjczpsdrpcmbaaubxal.supabase.co'; // <--- MASUKKAN URL DI SINI (Contoh: 'https://xyz.supabase.co')
+const HARDCODED_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndxamN6cHNkcnBjbWJhYXVieGFsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU0MTkwMjIsImV4cCI6MjA4MDk5NTAyMn0.jKp4JHxCNvLzIStAWUmmixeHHMTWmqNFKUvum-Veb1o'; // <--- MASUKKAN KEY DI SINI (Contoh: 'eyJhb...')
 
 // 1. Cek Environment Variables (Vercel)
 const env = (import.meta as any).env || {};
