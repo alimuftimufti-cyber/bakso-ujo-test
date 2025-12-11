@@ -1,26 +1,63 @@
+
 import { createClient } from '@supabase/supabase-js';
 
-// --- KONFIGURASI SUPABASE ---
-// 1. URL Project Anda (Sudah saya masukkan sesuai yang Anda kirim)
+// --- KONFIGURASI SUPABASE (SMART SETUP) ---
+// Kita prioritaskan Environment Variable (Vercel), tapi jika kosong,
+// kita izinkan membaca dari LocalStorage browser agar user pemula mudah setting.
+
 const MANUAL_URL = 'https://wqjczpsdrpcmbaaubxal.supabase.co';
 
-// 2. MASUKKAN ANON KEY DI SINI (Jika di Vercel belum jalan)
-// Hapus tulisan kosong di bawah, lalu paste kode panjang "anon public key" di antara tanda kutip
-// Contoh: const MANUAL_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...';
-const MANUAL_KEY = 'sb_secret_VhaHhCMvJCmZC_eVLRB-yQ_kaJy0MkM'; 
-
-// Sistem akan mencoba membaca dari Vercel dulu, kalau tidak ada baru pakai yang manual di atas
+// 1. Coba baca dari Environment (Vercel/Vite)
 const env = (import.meta as any).env || {};
-const supabaseUrl = env.VITE_SUPABASE_URL || MANUAL_URL;
-const supabaseKey = env.VITE_SUPABASE_ANON_KEY || MANUAL_KEY;
+let finalUrl = env.VITE_SUPABASE_URL || MANUAL_URL;
+let finalKey = env.VITE_SUPABASE_ANON_KEY;
 
-// Logika pembuatan client
-export const supabase = (supabaseUrl && supabaseKey) 
-  ? createClient(supabaseUrl, supabaseKey) 
+// 2. Jika di Environment kosong, coba baca dari Penyimpanan Browser (LocalStorage)
+if (!finalKey) {
+    try {
+        const storedKey = localStorage.getItem('bakso_ujo_anon_key');
+        const storedUrl = localStorage.getItem('bakso_ujo_url');
+        
+        if (storedKey) finalKey = storedKey;
+        if (storedUrl) finalUrl = storedUrl;
+    } catch (e) {
+        console.warn("Akses LocalStorage gagal (mungkin incognito/restricted).");
+    }
+}
+
+// 3. Validasi Format Kunci (Harus JWT 'ey...')
+const isValidKey = finalKey && finalKey.startsWith('ey');
+
+// 4. Buat Client
+export const supabase = (finalUrl && isValidKey) 
+  ? createClient(finalUrl, finalKey) 
   : null;
 
-// Log error di console browser jika kunci belum dipasang (untuk debugging)
-if (!supabaseKey) {
-  console.error("⚠️ SUPABASE KEY BELUM DIPASANG!");
-  console.error("Silakan buka file 'supabaseClient.ts' dan paste Anon Key di variabel MANUAL_KEY, atau atur di Vercel.");
+// --- FUNGSI BANTUAN (UNTUK SETUP DI APP.TSX) ---
+export const saveCredentials = (url: string, key: string) => {
+    if (!key.startsWith('ey')) {
+        alert("Format Kunci Salah! Harus berawalan 'ey...'. Cek 'anon public' di Supabase.");
+        return false;
+    }
+    localStorage.setItem('bakso_ujo_url', url);
+    localStorage.setItem('bakso_ujo_anon_key', key);
+    window.location.reload(); // Reload agar client baru terbentuk
+    return true;
+};
+
+export const clearCredentials = () => {
+    localStorage.removeItem('bakso_ujo_url');
+    localStorage.removeItem('bakso_ujo_anon_key');
+    window.location.reload();
+};
+
+export const hasSavedCredentials = () => {
+    return !!localStorage.getItem('bakso_ujo_anon_key');
+};
+
+// Log status untuk debugging
+if (!supabase) {
+    console.log("⚠️ Mode Offline: Database belum terhubung. Klik 'Setup Database' di aplikasi.");
+} else {
+    console.log("✅ Mode Online: Database Terhubung!");
 }

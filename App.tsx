@@ -5,7 +5,7 @@ import { AppContext } from './types';
 import type { MenuItem, Order, Shift, CartItem, Category, StoreProfile, AppContextType, ShiftSummary, Expense, OrderType, Ingredient, User, PaymentMethod, OrderStatus } from './types';
 import { initialMenuData, initialCategories, defaultStoreProfile } from './data';
 import PrintableReceipt from './components/PrintableReceipt';
-import { supabase } from './supabaseClient';
+import { supabase, saveCredentials, clearCredentials, hasSavedCredentials } from './supabaseClient';
 
 // Lazy Load Components
 const POSView = React.lazy(() => import('./components/POS'));
@@ -58,7 +58,62 @@ const PasswordModal = ({ title, onConfirm, onCancel }: { title: string, onConfir
     );
 };
 
-const LandingPage = ({ onSelectMode, storeName, logo, slogan }: { onSelectMode: (mode: AppMode) => void, storeName: string, logo?: string, slogan?: string }) => (
+// --- DATABASE SETUP MODAL (NEW) ---
+const DatabaseSetupModal = ({ onClose }: { onClose: () => void }) => {
+    const [key, setKey] = useState('');
+    // Default URL from previous context, user just needs Key
+    const [url, setUrl] = useState('https://wqjczpsdrpcmbaaubxal.supabase.co');
+
+    const handleSave = (e: React.FormEvent) => {
+        e.preventDefault();
+        saveCredentials(url, key);
+        onClose();
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[110] p-4">
+            <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full">
+                <div className="flex justify-between items-center mb-6">
+                    <h2 className="text-2xl font-bold text-gray-800">Setup Database Online</h2>
+                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600 font-bold text-xl">&times;</button>
+                </div>
+                
+                <p className="text-sm text-gray-600 mb-4 bg-blue-50 p-3 rounded border border-blue-100">
+                    Agar aplikasi bisa online, masukkan <b>Anon Public Key</b> dari Dashboard Supabase Anda.<br/>
+                    (Menu: Settings &rarr; API &rarr; Project API Keys)
+                </p>
+
+                <form onSubmit={handleSave} className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">Project URL</label>
+                        <input 
+                            type="text" 
+                            value={url} 
+                            onChange={(e) => setUrl(e.target.value)}
+                            className="w-full border rounded p-2 text-sm bg-gray-100 text-gray-600 cursor-not-allowed"
+                            readOnly 
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">Anon Public Key</label>
+                        <textarea 
+                            value={key} 
+                            onChange={(e) => setKey(e.target.value)}
+                            className="w-full border rounded p-2 text-sm h-24 font-mono text-xs focus:ring-2 focus:ring-orange-500 outline-none"
+                            placeholder="eyJh..."
+                            required
+                        />
+                    </div>
+                    <button type="submit" className="w-full bg-green-600 text-white font-bold py-3 rounded-xl hover:bg-green-700 transition-all shadow-lg">
+                        Simpan & Hubungkan
+                    </button>
+                </form>
+            </div>
+        </div>
+    );
+};
+
+const LandingPage = ({ onSelectMode, storeName, logo, slogan, onOpenDbSetup }: { onSelectMode: (mode: AppMode) => void, storeName: string, logo?: string, slogan?: string, onOpenDbSetup: () => void }) => (
     <div className="h-[100dvh] w-full bg-gradient-to-br from-orange-500 to-red-600 flex flex-col items-center justify-center p-6 text-white relative overflow-hidden">
         <div className="z-10 flex flex-col items-center justify-center w-full max-w-md text-center space-y-8">
             <div className="bg-white p-4 rounded-full inline-block shadow-2xl animate-bounce-slow">
@@ -82,13 +137,30 @@ const LandingPage = ({ onSelectMode, storeName, logo, slogan }: { onSelectMode: 
             </button>
         </div>
         
-        <div className="absolute bottom-6 w-full text-center z-10">
+        <div className="absolute bottom-6 w-full flex flex-col items-center gap-2 z-10">
             <button 
                 onClick={() => onSelectMode('admin')} 
                 className="text-white/40 hover:text-white text-xs font-semibold uppercase tracking-widest transition-colors py-2 px-4"
             >
                 Login Kasir / Admin
             </button>
+            
+            {/* Database Status Indicator */}
+            {supabase ? (
+                 <div className="flex items-center gap-2 text-green-200 text-xs bg-green-900/30 px-3 py-1 rounded-full backdrop-blur-sm">
+                    <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></span>
+                    Online Database
+                    {hasSavedCredentials() && <button onClick={clearCredentials} className="ml-2 hover:text-white underline" title="Logout DB">X</button>}
+                 </div>
+            ) : (
+                <button 
+                    onClick={onOpenDbSetup}
+                    className="flex items-center gap-2 text-red-200 hover:text-white text-xs bg-red-900/30 px-3 py-1 rounded-full backdrop-blur-sm hover:bg-red-900/50 transition-all cursor-pointer border border-red-400/30"
+                >
+                    <span className="w-2 h-2 bg-red-400 rounded-full"></span>
+                    Mode Offline (Klik untuk Online)
+                </button>
+            )}
         </div>
     </div>
 );
@@ -149,6 +221,9 @@ const App: React.FC = () => {
     const [kitchenAlarmTime, setKitchenAlarmTime] = useState<number>(600);
     const [kitchenAlarmSound, setKitchenAlarmSound] = useState<string>('beep');
     const [isLoadingData, setIsLoadingData] = useState(false);
+    
+    // Setup Modal State
+    const [isDbSetupOpen, setDbSetupOpen] = useState(false);
 
     // Ephemeral State
     const [passwordRequest, setPasswordRequest] = useState<{title: string, onConfirm: () => void, requireAdmin: boolean} | null>(null);
@@ -713,36 +788,11 @@ const App: React.FC = () => {
         if(supabase) await supabase.from('ingredients').delete().eq('id', id);
     };
     
-    const setMenuWrapper = (value: React.SetStateAction<MenuItem[]>) => {
-         // Logic for saving menu to DB handled in SettingsView calling specific updaters,
-         // or we can intercept here. For now, SettingsView calls saveMenu.
-         // Let's implement a direct DB saver in SettingsView or expose a function here.
-         // For simplicity, we expose generic setter but also a sync function.
-         setMenu(value);
-    }
-    
-    // Wrapped setMenu to allow syncing. Actually, simpler to handle in SettingsView directly or use a new method.
-    // I'll update the Context to handle Menu CRUD more explicitly in future refactor, 
-    // but for now, I will modify how SettingsView calls setMenu by adding a db sync effect there or here.
-    // Given the structure, I will intercept setMenu in SettingsView actions.
-    // Better: Add addMenu/updateMenu/deleteMenu to context?
-    // To minimize changes, I will add these to context later, but for now I will just use setMenu for local state
-    // and manual DB calls in the components, OR refactor SettingsView to use context methods if I add them.
-    // Let's stick to the current pattern: Data is fetched on load. Updates should act on DB then refresh or optimistic.
-    
-    // I'll patch the setMenu context usage:
     const handleSetMenu = (action: React.SetStateAction<MenuItem[]>) => {
-         // This is a bit complex because action can be a function. 
-         // Realistically, for this migration, I should expose explicit CRUD methods in Context
-         // But context type definition is in types.ts. I can't change types.ts easily without breaking other files.
-         // I will trust the components to call setMenu and I will add a Listener? No.
-         // Best approach: In SettingsView, I'll update the logic to call DB.
          setMenu(action);
     };
     
-    // Saving Store Profile
     const handleSetStoreProfile = (action: React.SetStateAction<StoreProfile>) => {
-        // Resolve value
         const newValue = action instanceof Function ? action(storeProfile) : action;
         setStoreProfile(newValue);
         if(supabase) {
@@ -758,7 +808,6 @@ const App: React.FC = () => {
                 auto_print_receipt: newValue.autoPrintReceipt
             }).eq('id', 1).then(({error}) => {
                 if(error) {
-                    // if row doesn't exist, insert
                      supabase.from('store_profile').insert({ ...newValue }).then();
                 }
             });
@@ -775,21 +824,12 @@ const App: React.FC = () => {
         addExpense, deleteExpense, requestPassword,
         printerDevice, isPrinting, connectToPrinter, disconnectPrinter, previewReceipt, printOrderToDevice, printOrderViaBrowser
     };
-    
-    // Persist Menu changes helper (since setMenu is generic)
-    // We will handle menu CRUD in SettingsView by passing a custom updater if needed, 
-    // BUT since I am editing App.tsx, I can update the context to include menu CRUD if I edit types.ts.
-    // The user said "Keep updates minimal". The Context interface in types.ts has setMenu. 
-    // I will modify SettingsView to call supabase directly? No, separation of concerns.
-    // I will piggyback on the fact that when setMenu is called, we usually want to save.
-    // actually, let's just make sure SettingsView uses the new DB logic. 
-    // Wait, I can't modify SettingsView unless I include it in the XML.
-    // I WILL INCLUDE SettingsView in the XML to ensure DB calls are made.
 
     return (
         <AppContext.Provider value={contextValue}>
             {/* Global Modals */}
             {passwordRequest && <PasswordModal title={passwordRequest.title} onConfirm={handlePasswordConfirm} onCancel={() => setPasswordRequest(null)} />}
+            {isDbSetupOpen && <DatabaseSetupModal onClose={() => setDbSetupOpen(false)} />}
             
             <Suspense fallback={null}>
                 {orderToPreview && <ReceiptPreviewModal order={orderToPreview} onClose={() => setOrderToPreview(null)} variant={printVariant} />}
@@ -801,7 +841,7 @@ const App: React.FC = () => {
                 </div>
             )}
 
-            {appMode === 'landing' && <LandingPage onSelectMode={setAppMode} storeName={storeProfile.name} logo={storeProfile.logo} slogan={storeProfile.slogan} />}
+            {appMode === 'landing' && <LandingPage onSelectMode={setAppMode} storeName={storeProfile.name} logo={storeProfile.logo} slogan={storeProfile.slogan} onOpenDbSetup={() => setDbSetupOpen(true)} />}
             
             {appMode === 'admin' && !isLoggedIn && <LoginScreen onLogin={handleLogin} onBack={() => setAppMode('landing')} />}
             
