@@ -131,7 +131,8 @@ const DatabaseSetupModal = ({ onClose }: { onClose: () => void }) => {
     );
 };
 
-const LandingPage = ({ onSelectMode, storeName, logo, slogan, onOpenDbSetup, dbError }: { onSelectMode: (mode: AppMode) => void, storeName: string, logo?: string, slogan?: string, onOpenDbSetup: () => void, dbError: string | null }) => (
+// --- LANDING PAGE (BERSIH DARI SETTING DATABASE) ---
+const LandingPage = ({ onSelectMode, storeName, logo, slogan }: { onSelectMode: (mode: AppMode) => void, storeName: string, logo?: string, slogan?: string }) => (
     <div className="h-[100dvh] w-full bg-gradient-to-br from-orange-500 to-red-600 flex flex-col items-center justify-center p-6 text-white relative overflow-hidden">
         <div className="z-10 flex flex-col items-center justify-center w-full max-w-md text-center space-y-8">
             <div className="bg-white p-4 rounded-full inline-block shadow-2xl animate-bounce-slow">
@@ -162,44 +163,31 @@ const LandingPage = ({ onSelectMode, storeName, logo, slogan, onOpenDbSetup, dbE
             >
                 Login Kasir / Admin
             </button>
-            
-            {/* Database Status Indicator */}
-            {dbError ? (
-                 <div className="bg-red-800/90 text-white p-4 rounded-lg text-center max-w-sm border-2 border-red-400 animate-pulse">
-                     <p className="font-bold text-sm mb-1">MASALAH DATABASE: TABEL BELUM DIBUAT</p>
-                     <p className="text-xs opacity-90">Boss, sepertinya Anda belum menjalankan "Mantra Ajaib" SQL di Supabase. Koneksi berhasil tapi tabel tidak ditemukan.</p>
-                     <p className="text-xs mt-2 bg-black/20 p-1 rounded font-mono">Error: {dbError}</p>
-                 </div>
-            ) : supabase ? (
-                 <div className="flex items-center gap-2 text-green-200 text-xs bg-green-900/30 px-3 py-1 rounded-full backdrop-blur-sm">
-                    <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></span>
-                    Online Database
-                    <button onClick={onOpenDbSetup} className="ml-2 hover:text-white underline" title="Ubah Koneksi">Setting</button>
-                 </div>
-            ) : (
-                <button 
-                    onClick={onOpenDbSetup}
-                    className="flex items-center gap-2 text-red-200 hover:text-white text-xs bg-red-900/30 px-3 py-1 rounded-full backdrop-blur-sm hover:bg-red-900/50 transition-all cursor-pointer border border-red-400/30"
-                >
-                    <span className="w-2 h-2 bg-red-400 rounded-full"></span>
-                    Mode Offline (Klik untuk Online)
-                </button>
-            )}
         </div>
     </div>
 );
 
-const LoginScreen = ({ onLogin, onBack }: { onLogin: (pin: string) => void, onBack: () => void }) => {
+// --- LOGIN SCREEN (DENGAN AKSES DATABASE SETTING) ---
+const LoginScreen = ({ onLogin, onBack, onOpenDbSetup, dbError }: { onLogin: (pin: string) => void, onBack: () => void, onOpenDbSetup: () => void, dbError: string | null }) => {
     const [password, setPassword] = useState('');
     const handleSubmit = (e: React.FormEvent) => { e.preventDefault(); onLogin(password); };
 
     return (
      <div className="fixed inset-0 bg-gray-900/95 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
         <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-sm w-full relative flex flex-col justify-center">
+            
+            {/* Tombol Back */}
             <button onClick={onBack} className="absolute top-4 right-4 text-gray-400 hover:text-gray-800 transition-colors">
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
             
+            {/* Tombol Database (Tersembunyi di dalam Login) */}
+            <div className="absolute top-4 left-4">
+                 <button onClick={onOpenDbSetup} className="text-gray-300 hover:text-orange-500 transition-colors p-1" title="Konfigurasi Database">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" /></svg>
+                 </button>
+            </div>
+
             <div className="text-center mb-6">
                 <h2 className="text-2xl font-bold text-gray-800">Login Staff</h2>
                 <p className="text-gray-500 text-sm">Masukkan PIN untuk akses kasir</p>
@@ -221,6 +209,23 @@ const LoginScreen = ({ onLogin, onBack }: { onLogin: (pin: string) => void, onBa
                     Masuk Aplikasi
                  </button>
             </form>
+
+            {/* Indikator Status Database (Hanya terlihat di sini) */}
+            <div className="mt-6 text-center">
+                 {dbError ? (
+                     <div className="bg-red-50 border border-red-200 text-red-600 p-2 rounded text-xs">
+                         <b>Koneksi Bermasalah</b><br/>{dbError}
+                     </div>
+                 ) : supabase ? (
+                     <div className="flex items-center justify-center gap-1.5 text-green-600 text-xs font-medium">
+                         <span className="w-2 h-2 bg-green-500 rounded-full"></span> Database Online
+                     </div>
+                 ) : (
+                     <div className="flex items-center justify-center gap-1.5 text-gray-400 text-xs font-medium">
+                         <span className="w-2 h-2 bg-gray-400 rounded-full"></span> Mode Offline
+                     </div>
+                 )}
+            </div>
         </div>
     </div>
     );
@@ -884,9 +889,16 @@ const App: React.FC = () => {
                 </div>
             )}
 
-            {appMode === 'landing' && <LandingPage onSelectMode={setAppMode} storeName={storeProfile.name} logo={storeProfile.logo} slogan={storeProfile.slogan} onOpenDbSetup={() => setDbSetupOpen(true)} dbError={databaseError} />}
+            {appMode === 'landing' && <LandingPage onSelectMode={setAppMode} storeName={storeProfile.name} logo={storeProfile.logo} slogan={storeProfile.slogan} />}
             
-            {appMode === 'admin' && !isLoggedIn && <LoginScreen onLogin={handleLogin} onBack={() => setAppMode('landing')} />}
+            {appMode === 'admin' && !isLoggedIn && (
+                <LoginScreen 
+                    onLogin={handleLogin} 
+                    onBack={() => setAppMode('landing')} 
+                    onOpenDbSetup={() => setDbSetupOpen(true)}
+                    dbError={databaseError}
+                />
+            )}
             
             {appMode === 'admin' && isLoggedIn && (
                 <div className="flex h-screen overflow-hidden bg-gray-100">
