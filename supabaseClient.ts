@@ -1,14 +1,26 @@
-
 import { createClient } from '@supabase/supabase-js';
 
-// Kunci ini nanti akan kita isi dari Environment Variables Vercel
-// Gunakan fallback object {} untuk mencegah error "Cannot read properties of undefined" jika env belum siap
+// --- KONFIGURASI SUPABASE ---
+// 1. URL Project Anda (Sudah saya masukkan sesuai yang Anda kirim)
+const MANUAL_URL = 'https://wqjczpsdrpcmbaaubxal.supabase.co';
+
+// 2. MASUKKAN ANON KEY DI SINI (Jika di Vercel belum jalan)
+// Hapus tulisan kosong di bawah, lalu paste kode panjang "anon public key" di antara tanda kutip
+// Contoh: const MANUAL_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...';
+const MANUAL_KEY = 'sb_publishable_LCHPuVMp4rc0UC9MzNF3BQ_0_GI_Tsj'; 
+
+// Sistem akan mencoba membaca dari Vercel dulu, kalau tidak ada baru pakai yang manual di atas
 const env = (import.meta as any).env || {};
+const supabaseUrl = env.VITE_SUPABASE_URL || MANUAL_URL;
+const supabaseKey = env.VITE_SUPABASE_ANON_KEY || MANUAL_KEY;
 
-const supabaseUrl = env.VITE_SUPABASE_URL;
-const supabaseKey = env.VITE_SUPABASE_ANON_KEY;
-
-// Jika belum ada kunci (mode lokal awal) atau URL kosong, client akan null tapi aplikasi tidak crash
+// Logika pembuatan client
 export const supabase = (supabaseUrl && supabaseKey) 
   ? createClient(supabaseUrl, supabaseKey) 
   : null;
+
+// Log error di console browser jika kunci belum dipasang (untuk debugging)
+if (!supabaseKey) {
+  console.error("⚠️ SUPABASE KEY BELUM DIPASANG!");
+  console.error("Silakan buka file 'supabaseClient.ts' dan paste Anon Key di variabel MANUAL_KEY, atau atur di Vercel.");
+}
