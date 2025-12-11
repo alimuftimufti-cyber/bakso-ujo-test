@@ -1,36 +1,39 @@
 
 import { createClient } from '@supabase/supabase-js';
 
-// --- KONFIGURASI SUPABASE (AUTO CONNECT) ---
-// Saya masukkan kunci yang Boss berikan di sini agar langsung connect.
+// --- KONFIGURASI SUPABASE (PERMANEN) ---
+// Kunci ini ditanam langsung agar semua device (HP/Laptop) otomatis connect ke database yang sama.
+// Tidak perlu setting manual satu per satu.
 
-const HARDCODED_URL = 'https://wqjczpsdrpcmbaaubxal.supabase.co';
-const HARDCODED_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndxamN6cHNkcnBjbWJhYXVieGFsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU0MTkwMjIsImV4cCI6MjA4MDk5NTAyMn0.jKp4JHxCNvLzIStAWUmmixeHHMTWmqNFKUvum-Veb1o';
+const PROJECT_URL = 'https://wqjczpsdrpcmbaaubxal.supabase.co';
+const PROJECT_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndxamN6cHNkcnBjbWJhYXVieGFsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU0MTkwMjIsImV4cCI6MjA4MDk5NTAyMn0.jKp4JHxCNvLzIStAWUmmixeHHMTWmqNFKUvum-Veb1o';
 
-// 1. Coba baca dari Environment (Vercel/Vite)
+// 1. Cek apakah ada Environment Variables (Opsional, biasanya untuk Vercel)
 const env = (import.meta as any).env || {};
-let finalUrl = env.VITE_SUPABASE_URL || HARDCODED_URL;
-let finalKey = env.VITE_SUPABASE_ANON_KEY || HARDCODED_KEY;
+let finalUrl = env.VITE_SUPABASE_URL || PROJECT_URL;
+let finalKey = env.VITE_SUPABASE_ANON_KEY || PROJECT_KEY;
 
-// 2. Cek LocalStorage (jika user pernah input manual sebelumnya dan berbeda)
+// 2. Override dengan LocalStorage HANYA JIKA user secara eksplisit mengubahnya lewat menu setting
+// Namun, kita validasi ketat agar tidak error.
 try {
     const storedUrl = localStorage.getItem('bakso_ujo_url');
     const storedKey = localStorage.getItem('bakso_ujo_anon_key');
-    if (storedUrl && storedUrl.startsWith('http')) finalUrl = storedUrl;
-    if (storedKey && storedKey.startsWith('ey')) finalKey = storedKey;
+    
+    // Hanya gunakan settingan lokal jika valid dan lengkap
+    if (storedUrl && storedUrl.startsWith('http') && storedKey && storedKey.length > 20) {
+        console.log("Menggunakan konfigurasi manual dari device ini.");
+        finalUrl = storedUrl;
+        finalKey = storedKey;
+    } else {
+        // Jika settingan lokal kosong/rusak, gunakan default yang sudah ditanam
+        console.log("Menggunakan konfigurasi otomatis (Hardcoded).");
+    }
 } catch (e) {
-    console.warn("Akses LocalStorage gagal.");
+    console.warn("Gagal membaca penyimpanan lokal, menggunakan default.");
 }
 
-// 3. Validasi Format
-const isValidUrl = finalUrl && finalUrl.startsWith('http');
-const isValidKey = finalKey && finalKey.startsWith('ey');
-
-// 4. Buat Client
-// Jika kunci valid, kita buat client. Jika tidak, null (Offline Mode).
-export const supabase = (isValidUrl && isValidKey) 
-  ? createClient(finalUrl, finalKey) 
-  : null;
+// 3. Buat Koneksi
+export const supabase = createClient(finalUrl, finalKey);
 
 // --- FUNGSI BANTUAN ---
 
@@ -59,15 +62,12 @@ export const hasSavedCredentials = () => {
     return !!localStorage.getItem('bakso_ujo_anon_key');
 };
 
-// Reset ke Default (Hardcoded)
+// Reset ke Default (Menghapus settingan manual device ini dan kembali ke Hardcoded)
 export const resetToDefault = () => {
     localStorage.removeItem('bakso_ujo_url');
     localStorage.removeItem('bakso_ujo_anon_key');
     window.location.reload();
 }
 
-if (!supabase) {
-    console.log("⚠️ Mode Offline");
-} else {
-    console.log("✅ Mode Online: Mencoba menghubungkan ke", finalUrl);
-}
+// Log status untuk debugging
+console.log(`🚀 Aplikasi Bakso Ujo terhubung ke: ${finalUrl}`);
