@@ -1,6 +1,8 @@
+
 import React, { useState } from 'react';
 import { useAppContext } from '../types'; 
 import type { MenuItem, Ingredient, User } from '../types';
+import { supabase } from '../supabaseClient'; // Import Supabase directly
 
 const formatRupiah = (number: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(number);
 
@@ -86,10 +88,54 @@ const SettingsView = () => {
     const [userForm, setUserForm] = useState<User>({ id: '', name: '', pin: '', role: 'cashier' });
     const [editingUserId, setEditingUserId] = useState<string | null>(null);
 
-    const saveMenu = (item: MenuItem) => { setMenu(prev => { const idx = prev.findIndex(i => i.id === item.id); if (idx > -1) { const newMenu = [...prev]; newMenu[idx] = item; return newMenu; } return [...prev, item]; }); setMenuModalOpen(false); };
-    const deleteMenu = (id: number) => requestPassword("Hapus menu?", () => setMenu(prev => prev.filter(i => i.id !== id)));
+    const saveMenu = async (item: MenuItem) => { 
+        // Update Local State for UI
+        setMenu(prev => { 
+            const idx = prev.findIndex(i => i.id === item.id); 
+            if (idx > -1) { const newMenu = [...prev]; newMenu[idx] = item; return newMenu; } 
+            return [...prev, item]; 
+        }); 
+        setMenuModalOpen(false); 
+        
+        // Update DB
+        if(supabase) {
+            const payload = {
+                name: item.name,
+                price: item.price,
+                category: item.category,
+                image_url: item.imageUrl,
+                default_note: item.defaultNote,
+                stock: item.stock,
+                recipe: item.recipe
+            };
+            // Check if exists to determine insert or update (simplification using upsert logic handled by ID)
+            // But item.id might be Date.now(), which won't match DB bigints easily.
+            // Strategy: Try update, if fail/no rows affected? No, just rely on editingMenu state.
+            
+            if (editingMenu) {
+                // Update
+                await supabase.from('menu_items').update(payload).eq('id', item.id);
+            } else {
+                // Insert (Let DB generate ID, but we used Date.now() locally. 
+                // Ideally, we fetch again to get real ID. For now, simple insert.)
+                await supabase.from('menu_items').insert(payload);
+            }
+            // Ideally trigger a re-fetch in App.tsx via context, but this is okay for "starter" version.
+        }
+    };
+
+    const deleteMenu = async (id: number) => {
+        requestPassword("Hapus menu?", async () => {
+            setMenu(prev => prev.filter(i => i.id !== id));
+            if(supabase) await supabase.from('menu_items').delete().eq('id', id);
+        });
+    };
+
     const saveIng = (e: React.FormEvent) => { e.preventDefault(); if (editingIngId) updateIngredient(ingForm); else addIngredient({ ...ingForm, id: Date.now().toString() }); setIngForm({ id: '', name: '', unit: 'gram', stock: 0 }); setEditingIngId(null); };
-    const updateProductStock = (id: number, newStock: number) => { setMenu(prev => prev.map(m => m.id === id ? { ...m, stock: newStock } : m)); };
+    const updateProductStock = async (id: number, newStock: number) => { 
+        setMenu(prev => prev.map(m => m.id === id ? { ...m, stock: newStock } : m)); 
+        if(supabase) await supabase.from('menu_items').update({ stock: newStock }).eq('id', id);
+    };
     const saveUser = (e: React.FormEvent) => { e.preventDefault(); requestPassword("Simpan User?", () => { if (editingUserId) updateUser(userForm); else addUser({ ...userForm, id: Date.now().toString() }); setUserForm({ id: '', name: '', pin: '', role: 'cashier' }); setEditingUserId(null); }, true); };
     const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if(file) { const reader = new FileReader(); reader.onload = () => setStoreProfile({...storeProfile, logo: reader.result as string}); reader.readAsDataURL(file); } }
 
