@@ -7,10 +7,12 @@ import { createClient } from '@supabase/supabase-js';
 
 const MANUAL_URL = 'https://wqjczpsdrpcmbaaubxal.supabase.co';
 
+const MANUAL_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndxamN6cHNkcnBjbWJhYXVieGFsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU0MTkwMjIsImV4cCI6MjA4MDk5NTAyMn0.jKp4JHxCNvLzIStAWUmmixeHHMTWmqNFKUvum-Veb1o';
+
 // 1. Coba baca dari Environment (Vercel/Vite)
 const env = (import.meta as any).env || {};
 let finalUrl = env.VITE_SUPABASE_URL || MANUAL_URL;
-let finalKey = env.VITE_SUPABASE_ANON_KEY;
+let finalKey = env.VITE_SUPABASE_ANON_KEY || MANUAL_KEY;
 
 // 2. Jika di Environment kosong, coba baca dari Penyimpanan Browser (LocalStorage)
 if (!finalKey) {
