@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, Suspense, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AppContext } from './types'; 
@@ -62,6 +61,7 @@ const PasswordModal = ({ title, onConfirm, onCancel }: { title: string, onConfir
 const DatabaseSetupModal = ({ onClose }: { onClose: () => void }) => {
     const [key, setKey] = useState('');
     const [url, setUrl] = useState('');
+    const [showCode, setShowCode] = useState(false);
 
     useEffect(() => {
         // Load existing values if any
@@ -86,15 +86,14 @@ const DatabaseSetupModal = ({ onClose }: { onClose: () => void }) => {
 
     return (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[110] p-4">
-            <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full">
-                <div className="flex justify-between items-center mb-6">
-                    <h2 className="text-2xl font-bold text-gray-800">Setup Database Online</h2>
+            <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto">
+                <div className="flex justify-between items-center mb-4">
+                    <h2 className="text-2xl font-bold text-gray-800">Setup Database</h2>
                     <button onClick={onClose} className="text-gray-400 hover:text-gray-600 font-bold text-xl">&times;</button>
                 </div>
                 
                 <p className="text-sm text-gray-600 mb-4 bg-blue-50 p-3 rounded border border-blue-100">
-                    Masukkan <b>Project URL</b> dan <b>Anon Public Key</b> dari Dashboard Supabase Anda.<br/>
-                    (Menu: Settings &rarr; API)
+                    Masukkan URL dan Key dari Supabase. Setting ini tersimpan di browser ini saja.
                 </p>
 
                 <form onSubmit={handleSave} className="space-y-4">
@@ -119,13 +118,30 @@ const DatabaseSetupModal = ({ onClose }: { onClose: () => void }) => {
                     </div>
                     <div className="flex gap-2">
                         <button type="button" onClick={handleReset} className="flex-1 bg-gray-200 text-gray-700 font-bold py-3 rounded-xl hover:bg-gray-300 transition-all">
-                            Reset Default
+                            Reset
                         </button>
                         <button type="submit" className="flex-[2] bg-green-600 text-white font-bold py-3 rounded-xl hover:bg-green-700 transition-all shadow-lg">
-                            Simpan
+                            Simpan & Connect
                         </button>
                     </div>
                 </form>
+
+                <hr className="my-6 border-gray-200"/>
+
+                <div className="bg-gray-800 text-gray-200 p-4 rounded-lg text-xs">
+                    <div className="flex justify-between items-center mb-2">
+                         <h3 className="font-bold text-yellow-400">🔥 CARA AGAR ONLINE DI SEMUA DEVICE</h3>
+                    </div>
+                    <p className="mb-3 text-gray-400">
+                        Agar tidak perlu setting satu per satu, salin kode di bawah ini dan paste ke dalam file <b>supabaseClient.ts</b>:
+                    </p>
+                    <div className="relative">
+                        <pre className="bg-black p-3 rounded border border-gray-600 overflow-x-auto text-[10px] leading-relaxed">
+{`const HARDCODED_URL = '${url || '...'}'
+const HARDCODED_KEY = '${key || '...'}'`}
+                        </pre>
+                    </div>
+                </div>
             </div>
         </div>
     );
@@ -213,16 +229,21 @@ const LoginScreen = ({ onLogin, onBack, onOpenDbSetup, dbError }: { onLogin: (pi
             {/* Indikator Status Database (Hanya terlihat di sini) */}
             <div className="mt-6 text-center">
                  {dbError ? (
-                     <div className="bg-red-50 border border-red-200 text-red-600 p-2 rounded text-xs">
-                         <b>Koneksi Bermasalah</b><br/>{dbError}
+                     <div className="bg-red-50 border border-red-200 text-red-600 p-3 rounded-lg text-xs animate-pulse">
+                         <b className="block text-sm mb-1">Koneksi Bermasalah</b>
+                         {dbError.includes('Invalid API key') ? 'Kunci database salah/kadaluarsa.' : dbError}
+                         <button onClick={onOpenDbSetup} className="block w-full mt-2 bg-red-100 hover:bg-red-200 text-red-800 py-1 rounded font-bold transition-colors">
+                            Perbaiki Database
+                         </button>
                      </div>
                  ) : supabase ? (
                      <div className="flex items-center justify-center gap-1.5 text-green-600 text-xs font-medium">
                          <span className="w-2 h-2 bg-green-500 rounded-full"></span> Database Online
                      </div>
                  ) : (
-                     <div className="flex items-center justify-center gap-1.5 text-gray-400 text-xs font-medium">
-                         <span className="w-2 h-2 bg-gray-400 rounded-full"></span> Mode Offline
+                     <div className="flex flex-col items-center justify-center gap-2 text-gray-500 text-xs font-medium">
+                         <div className="flex items-center gap-1.5"><span className="w-2 h-2 bg-gray-400 rounded-full"></span> Mode Offline</div>
+                         <button onClick={onOpenDbSetup} className="text-orange-600 underline hover:text-orange-800">Hubungkan ke Online</button>
                      </div>
                  )}
             </div>

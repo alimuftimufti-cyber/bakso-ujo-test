@@ -1,39 +1,46 @@
-
 import { createClient } from '@supabase/supabase-js';
 
-// --- KONFIGURASI SUPABASE (PERMANEN) ---
-// Kunci ini ditanam langsung agar semua device (HP/Laptop) otomatis connect ke database yang sama.
-// Tidak perlu setting manual satu per satu.
+// --- KONFIGURASI SUPABASE ---
+// PENTING: Agar "Langsung Online Semua", Boss harus mengisi 2 baris di bawah ini 
+// dengan URL dan KEY yang benar dari Komputer 1 (Lihat menu Setting Database).
 
-const PROJECT_URL = 'https://wqjczpsdrpcmbaaubxal.supabase.co';
-const PROJECT_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndxamN6cHNkcnBjbWJhYXVieGFsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU0MTkwMjIsImV4cCI6MjA4MDk5NTAyMn0.jKp4JHxCNvLzIStAWUmmixeHHMTWmqNFKUvum-Veb1o';
+const HARDCODED_URL = ''; // <--- MASUKKAN URL DI SINI (Contoh: 'https://xyz.supabase.co')
+const HARDCODED_KEY = ''; // <--- MASUKKAN KEY DI SINI (Contoh: 'eyJhb...')
 
-// 1. Cek apakah ada Environment Variables (Opsional, biasanya untuk Vercel)
+// 1. Cek Environment Variables (Vercel)
 const env = (import.meta as any).env || {};
-let finalUrl = env.VITE_SUPABASE_URL || PROJECT_URL;
-let finalKey = env.VITE_SUPABASE_ANON_KEY || PROJECT_KEY;
+let finalUrl = env.VITE_SUPABASE_URL || HARDCODED_URL;
+let finalKey = env.VITE_SUPABASE_ANON_KEY || HARDCODED_KEY;
 
-// 2. Override dengan LocalStorage HANYA JIKA user secara eksplisit mengubahnya lewat menu setting
-// Namun, kita validasi ketat agar tidak error.
+// 2. Cek LocalStorage (Jika user pernah input manual)
 try {
     const storedUrl = localStorage.getItem('bakso_ujo_url');
     const storedKey = localStorage.getItem('bakso_ujo_anon_key');
     
-    // Hanya gunakan settingan lokal jika valid dan lengkap
-    if (storedUrl && storedUrl.startsWith('http') && storedKey && storedKey.length > 20) {
-        console.log("Menggunakan konfigurasi manual dari device ini.");
+    // Prioritas: Jika Hardcoded kosong, baru pakai LocalStorage
+    // Jika Hardcoded ada isinya, kita pakai Hardcoded (agar konsisten di semua device)
+    const hasHardcoded = HARDCODED_URL.length > 10 && HARDCODED_KEY.length > 20;
+
+    if (!hasHardcoded && storedUrl && storedUrl.startsWith('http') && storedKey && storedKey.length > 20) {
+        console.log("Menggunakan konfigurasi dari LocalStorage.");
         finalUrl = storedUrl;
         finalKey = storedKey;
-    } else {
-        // Jika settingan lokal kosong/rusak, gunakan default yang sudah ditanam
-        console.log("Menggunakan konfigurasi otomatis (Hardcoded).");
+    } else if (hasHardcoded) {
+        console.log("Menggunakan konfigurasi Hardcoded (Permanen).");
+        finalUrl = HARDCODED_URL;
+        finalKey = HARDCODED_KEY;
     }
 } catch (e) {
-    console.warn("Gagal membaca penyimpanan lokal, menggunakan default.");
+    console.warn("Gagal membaca penyimpanan lokal.");
 }
 
-// 3. Buat Koneksi
-export const supabase = createClient(finalUrl, finalKey);
+// 3. Validasi & Buat Client
+const isValidUrl = finalUrl && finalUrl.startsWith('http');
+const isValidKey = finalKey && finalKey.length > 20;
+
+export const supabase = (isValidUrl && isValidKey) 
+  ? createClient(finalUrl, finalKey) 
+  : null;
 
 // --- FUNGSI BANTUAN ---
 
@@ -58,16 +65,18 @@ export const clearCredentials = () => {
     window.location.reload();
 };
 
-export const hasSavedCredentials = () => {
-    return !!localStorage.getItem('bakso_ujo_anon_key');
-};
-
-// Reset ke Default (Menghapus settingan manual device ini dan kembali ke Hardcoded)
 export const resetToDefault = () => {
     localStorage.removeItem('bakso_ujo_url');
     localStorage.removeItem('bakso_ujo_anon_key');
     window.location.reload();
 }
 
-// Log status untuk debugging
-console.log(`🚀 Aplikasi Bakso Ujo terhubung ke: ${finalUrl}`);
+export const hasSavedCredentials = () => {
+    return !!localStorage.getItem('bakso_ujo_url') && !!localStorage.getItem('bakso_ujo_anon_key');
+};
+
+if (!supabase) {
+    console.log("⚠️ Mode Offline (Belum ada URL/Key yang valid)");
+} else {
+    console.log(`✅ Mode Online: Terhubung ke ${finalUrl}`);
+}
