@@ -7,7 +7,7 @@ const MANUAL_URL = 'https://wqjczpsdrpcmbaaubxal.supabase.co';
 // 2. MASUKKAN ANON KEY DI SINI (Jika di Vercel belum jalan)
 // Hapus tulisan kosong di bawah, lalu paste kode panjang "anon public key" di antara tanda kutip
 // Contoh: const MANUAL_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...';
-const MANUAL_KEY = 'sb_publishable_LCHPuVMp4rc0UC9MzNF3BQ_0_GI_Tsj'; 
+const MANUAL_KEY = 'sb_secret_VhaHhCMvJCmZC_eVLRB-yQ_kaJy0MkM'; 
 
 // Sistem akan mencoba membaca dari Vercel dulu, kalau tidak ada baru pakai yang manual di atas
 const env = (import.meta as any).env || {};
