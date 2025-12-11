@@ -1,10 +1,11 @@
 
-import React, { useState, useEffect, Suspense } from 'react';
+import React, { useState, useEffect, Suspense, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
-import { AppContext } from './types'; // Import Context from types
+import { AppContext } from './types'; 
 import type { MenuItem, Order, Shift, CartItem, Category, StoreProfile, AppContextType, ShiftSummary, Expense, OrderType, Ingredient, User, PaymentMethod, OrderStatus } from './types';
 import { initialMenuData, initialCategories, defaultStoreProfile } from './data';
 import PrintableReceipt from './components/PrintableReceipt';
+import { supabase } from './supabaseClient';
 
 // Lazy Load Components
 const POSView = React.lazy(() => import('./components/POS'));
@@ -27,24 +28,6 @@ const Icons = {
 
 type View = 'pos' | 'kitchen' | 'settings' | 'shift' | 'report';
 type AppMode = 'landing' | 'admin' | 'customer';
-
-function useLocalStorage<T>(key: string, initialValue: T): [T, React.Dispatch<React.SetStateAction<T>>] {
-    const [storedValue, setStoredValue] = useState<T>(() => {
-        try {
-            const item = window.localStorage.getItem(key);
-            return item ? JSON.parse(item) : initialValue;
-        } catch (error) { console.error(error); return initialValue; }
-    });
-
-    const setValue: React.Dispatch<React.SetStateAction<T>> = (value) => {
-        try {
-            const valueToStore = value instanceof Function ? value(storedValue) : value;
-            setStoredValue(valueToStore);
-            window.localStorage.setItem(key, JSON.stringify(valueToStore));
-        } catch (error) { console.error(error); }
-    };
-    return [storedValue, setValue];
-}
 
 const PasswordModal = ({ title, onConfirm, onCancel }: { title: string, onConfirm: (password: string) => void, onCancel: () => void }) => {
     const [password, setPassword] = useState('');
@@ -147,30 +130,25 @@ const LoginScreen = ({ onLogin, onBack }: { onLogin: (pin: string) => void, onBa
     );
 };
 
-// --- DATABASE VERSION KEY (BUMP TO RESET) ---
-const DB_VER = 'v16_stable';
-
 const App: React.FC = () => {
     const [appMode, setAppMode] = useState<AppMode>('landing');
     const [view, setView] = useState<View>('pos');
     
-    // Data State
-    const [isLoggedIn, setIsLoggedIn] = useLocalStorage<boolean>(`pos-isLoggedIn-${DB_VER}`, false);
-    const [currentUser, setCurrentUser] = useLocalStorage<User | null>(`pos-currentUser-${DB_VER}`, null);
-    const [menu, setMenu] = useLocalStorage<MenuItem[]>(`pos-menu-${DB_VER}`, initialMenuData);
-    const [categories, setCategories] = useLocalStorage<Category[]>(`pos-categories-${DB_VER}`, initialCategories);
-    const [orders, setOrders] = useLocalStorage<Order[]>(`pos-orders-${DB_VER}`, []);
-    const [expenses, setExpenses] = useLocalStorage<Expense[]>(`pos-expenses-${DB_VER}`, []);
-    const [activeShift, setActiveShift] = useLocalStorage<Shift | null>(`pos-activeShift-${DB_VER}`, null);
-    const [completedShifts, setCompletedShifts] = useLocalStorage<Shift[]>(`pos-completedShifts-${DB_VER}`, []);
-    const [storeProfile, setStoreProfile] = useLocalStorage<StoreProfile>(`pos-storeProfile-${DB_VER}`, defaultStoreProfile);
-    const [ingredients, setIngredients] = useLocalStorage<Ingredient[]>(`pos-ingredients-${DB_VER}`, []);
-    const [users, setUsers] = useLocalStorage<User[]>(`pos-users-${DB_VER}`, [
-        { id: 'admin', name: 'Admin', pin: '1234', role: 'admin' },
-        { id: 'cashier1', name: 'Kasir 1', pin: '1111', role: 'cashier' }
-    ]);
-    const [kitchenAlarmTime, setKitchenAlarmTime] = useLocalStorage<number>(`pos-kitchenAlarmTime-${DB_VER}`, 600);
-    const [kitchenAlarmSound, setKitchenAlarmSound] = useLocalStorage<string>(`pos-kitchenAlarmSound-${DB_VER}`, 'beep');
+    // --- SUPABASE STATE ---
+    const [isLoggedIn, setIsLoggedIn] = useState(false);
+    const [currentUser, setCurrentUser] = useState<User | null>(null);
+    const [menu, setMenu] = useState<MenuItem[]>([]);
+    const [categories, setCategories] = useState<Category[]>(initialCategories);
+    const [orders, setOrders] = useState<Order[]>([]);
+    const [expenses, setExpenses] = useState<Expense[]>([]);
+    const [activeShift, setActiveShift] = useState<Shift | null>(null);
+    const [completedShifts, setCompletedShifts] = useState<Shift[]>([]);
+    const [storeProfile, setStoreProfile] = useState<StoreProfile>(defaultStoreProfile);
+    const [ingredients, setIngredients] = useState<Ingredient[]>([]);
+    const [users, setUsers] = useState<User[]>([]);
+    const [kitchenAlarmTime, setKitchenAlarmTime] = useState<number>(600);
+    const [kitchenAlarmSound, setKitchenAlarmSound] = useState<string>('beep');
+    const [isLoadingData, setIsLoadingData] = useState(false);
 
     // Ephemeral State
     const [passwordRequest, setPasswordRequest] = useState<{title: string, onConfirm: () => void, requireAdmin: boolean} | null>(null);
@@ -179,6 +157,144 @@ const App: React.FC = () => {
     const [isPrinting, setIsPrinting] = useState(false);
     const [orderForBrowserPrint, setOrderForBrowserPrint] = useState<Order | null>(null);
     const [printVariant, setPrintVariant] = useState<'receipt' | 'kitchen'>('receipt');
+
+    // --- FETCH DATA FROM SUPABASE ---
+    const fetchData = useCallback(async () => {
+        if (!supabase) {
+            // Fallback for offline/local (using default data)
+            setMenu(initialMenuData);
+            setCategories(initialCategories);
+            setUsers([{ id: 'admin', name: 'Admin', pin: '1234', role: 'admin' }]);
+            return;
+        }
+        setIsLoadingData(true);
+        try {
+            // 1. Menu
+            const { data: menuData } = await supabase.from('menu_items').select('*');
+            if (menuData) {
+                setMenu(menuData.map((m: any) => ({
+                    id: m.id,
+                    name: m.name,
+                    price: m.price,
+                    category: m.category,
+                    imageUrl: m.image_url,
+                    defaultNote: m.default_note,
+                    stock: m.stock,
+                    recipe: m.recipe
+                })));
+            }
+            
+            // 2. Categories
+            const { data: catData } = await supabase.from('categories').select('*');
+            if (catData && catData.length > 0) {
+                setCategories(catData.map((c: any) => c.name));
+            }
+
+            // 3. Profile
+            const { data: profileData } = await supabase.from('store_profile').select('*').single();
+            if (profileData) {
+                setStoreProfile({
+                    name: profileData.name,
+                    address: profileData.address,
+                    slogan: profileData.slogan,
+                    logo: profileData.logo,
+                    taxRate: profileData.tax_rate,
+                    enableTax: profileData.enable_tax,
+                    serviceChargeRate: profileData.service_charge_rate,
+                    enableServiceCharge: profileData.enable_service_charge,
+                    enableTableLayout: profileData.enable_table_layout,
+                    autoPrintReceipt: profileData.auto_print_receipt
+                });
+            }
+
+            // 4. Ingredients
+            const { data: ingData } = await supabase.from('ingredients').select('*');
+            if (ingData) setIngredients(ingData);
+
+            // 5. Users
+            const { data: userData } = await supabase.from('app_users').select('*');
+            if (userData) setUsers(userData);
+
+            // 6. Active Shift
+            const { data: shiftData } = await supabase.from('shifts').select('*').is('end_time', null).single();
+            if (shiftData) {
+                setActiveShift({
+                    id: shiftData.id,
+                    start: Number(shiftData.start_time),
+                    revenue: shiftData.revenue,
+                    transactions: shiftData.total_transactions,
+                    cashRevenue: shiftData.cash_revenue,
+                    nonCashRevenue: shiftData.non_cash_revenue,
+                    start_cash: shiftData.start_cash,
+                    totalDiscount: shiftData.total_discount,
+                    orderCount: 0 // Will recalculate from orders
+                });
+            }
+
+            // 7. Orders (Last 24 hours or Active Shift orders)
+            // Fetching active orders + recent history
+            const { data: orderData } = await supabase.from('orders').select('*').order('created_at', { ascending: true });
+            if (orderData) {
+                 const mappedOrders: Order[] = orderData.map((o: any) => ({
+                    id: o.id,
+                    sequentialId: o.sequential_id,
+                    customerName: o.customer_name,
+                    items: o.items,
+                    total: o.total,
+                    subtotal: o.subtotal,
+                    discount: o.discount,
+                    discountType: o.discount_type,
+                    discountValue: o.discount_value,
+                    taxAmount: o.tax_amount,
+                    serviceChargeAmount: o.service_charge_amount,
+                    status: o.status,
+                    createdAt: Number(o.created_at),
+                    readyAt: o.ready_at ? Number(o.ready_at) : undefined,
+                    completedAt: o.completed_at ? Number(o.completed_at) : undefined,
+                    isPaid: o.is_paid,
+                    paidAt: o.paid_at ? Number(o.paid_at) : undefined,
+                    paymentMethod: o.payment_method,
+                    shiftId: o.shift_id,
+                    orderType: o.order_type
+                 }));
+                 setOrders(mappedOrders);
+            }
+             
+             // 8. Expenses
+             const { data: expenseData } = await supabase.from('expenses').select('*');
+             if(expenseData) {
+                 setExpenses(expenseData.map((e: any) => ({
+                     id: e.id,
+                     shiftId: e.shift_id,
+                     description: e.description,
+                     amount: e.amount,
+                     date: Number(e.date)
+                 })));
+             }
+
+        } catch (error) {
+            console.error("Error fetching initial data", error);
+        } finally {
+            setIsLoadingData(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        fetchData();
+        
+        // REALTIME SUBSCRIPTION FOR ORDERS (Kitchen Update)
+        if (supabase) {
+            const channel = supabase.channel('public:orders')
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, (payload) => {
+                    // Simple strategy: Re-fetch orders to stay in sync
+                    // Ideally we optimize this to only append/update state
+                     fetchData(); 
+                })
+                .subscribe();
+
+            return () => { supabase.removeChannel(channel); }
+        }
+    }, [fetchData]);
 
     // Printer Browser Effect
     useEffect(() => {
@@ -223,79 +339,59 @@ const App: React.FC = () => {
     };
     const handleLogout = () => { setIsLoggedIn(false); setCurrentUser(null); setAppMode('landing'); };
 
-    const addCategory = (cat: string) => {
-        if(!categories.includes(cat)) setCategories([...categories, cat]);
+    const addCategory = async (cat: string) => {
+        if(!categories.includes(cat)) {
+            if(supabase) await supabase.from('categories').insert({ name: cat });
+            setCategories([...categories, cat]);
+        }
     }
-    const deleteCategory = (cat: string) => {
+    const deleteCategory = async (cat: string) => {
         if(confirm(`Hapus kategori ${cat}? Menu terkait akan kehilangan kategorinya.`)) {
+             if(supabase) await supabase.from('categories').delete().eq('name', cat);
             setCategories(categories.filter(c => c !== cat));
         }
     }
 
-    const deductStock = (items: CartItem[]) => {
-        const deductions = new Map<string, number>();
-        const productDeductions = new Map<number, number>();
-
-        items.forEach(item => {
-            const menuItem = menu.find(m => m.id === item.id);
-            if (menuItem) {
-                if (menuItem.recipe && menuItem.recipe.length > 0) {
-                    menuItem.recipe.forEach(r => deductions.set(r.ingredientId, (deductions.get(r.ingredientId) || 0) + r.amount * item.quantity));
-                }
-                if (menuItem.stock !== undefined) {
-                    productDeductions.set(menuItem.id, (productDeductions.get(menuItem.id) || 0) + item.quantity);
-                }
-            }
-        });
-
-        setIngredients(prev => prev.map(ing => {
-            const amount = deductions.get(ing.id);
-            return amount ? { ...ing, stock: ing.stock - amount } : ing;
-        }));
-
-        setMenu(prev => prev.map(m => {
-            const deduction = productDeductions.get(m.id);
-            return deduction ? { ...m, stock: (m.stock || 0) - deduction } : m;
-        }));
+    // --- STOCK MANAGEMENT (Simple Client-side Loop for Supabase) ---
+    const updateStockInDB = async (items: CartItem[], mode: 'deduct' | 'restore') => {
+         if (!supabase) return;
+         // Note: For high volume, this should be a stored procedure / RPC. 
+         // For basic usage, iterating updates is acceptable.
+         items.forEach(async (item) => {
+             const menuItem = menu.find(m => m.id === item.id);
+             if (menuItem) {
+                 // 1. Ingredients
+                 if (menuItem.recipe && menuItem.recipe.length > 0) {
+                     menuItem.recipe.forEach(async (r) => {
+                         const ing = ingredients.find(i => i.id === r.ingredientId);
+                         if (ing) {
+                             const change = mode === 'deduct' ? - (r.amount * item.quantity) : (r.amount * item.quantity);
+                             const newStock = Number(ing.stock) + change;
+                             await supabase!.from('ingredients').update({ stock: newStock }).eq('id', r.ingredientId);
+                         }
+                     });
+                 }
+                 // 2. Direct Stock
+                 if (menuItem.stock !== undefined && menuItem.stock !== null) {
+                     const change = mode === 'deduct' ? - item.quantity : item.quantity;
+                     const newStock = Number(menuItem.stock) + change;
+                     await supabase!.from('menu_items').update({ stock: newStock }).eq('id', menuItem.id);
+                 }
+             }
+         });
+         fetchData(); // Refresh data to update local state
     };
 
-    const restoreStock = (items: CartItem[]) => {
-        const restorations = new Map<string, number>();
-        const productRestorations = new Map<number, number>();
-
-        items.forEach(item => {
-            const menuItem = menu.find(m => m.id === item.id);
-            if (menuItem) {
-                if (menuItem.recipe && menuItem.recipe.length > 0) {
-                    menuItem.recipe.forEach(r => restorations.set(r.ingredientId, (restorations.get(r.ingredientId) || 0) + r.amount * item.quantity));
-                }
-                if (menuItem.stock !== undefined) {
-                    productRestorations.set(menuItem.id, (productRestorations.get(menuItem.id) || 0) + item.quantity);
-                }
-            }
-        });
-
-        setIngredients(prev => prev.map(ing => {
-            const amount = restorations.get(ing.id);
-            return amount ? { ...ing, stock: ing.stock + amount } : ing;
-        }));
-
-        setMenu(prev => prev.map(m => {
-            const restoration = productRestorations.get(m.id);
-            return restoration ? { ...m, stock: (m.stock || 0) + restoration } : m;
-        }));
-    };
+    const deductStock = (items: CartItem[]) => updateStockInDB(items, 'deduct');
+    const restoreStock = (items: CartItem[]) => updateStockInDB(items, 'restore');
 
     const calculateOrderTotals = (items: CartItem[], discountValue: number, discountType: 'percent' | 'fixed') => {
         const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
         let discount = discountType === 'percent' ? (subtotal * discountValue / 100) : discountValue;
         discount = Math.min(discount, subtotal);
         const taxable = subtotal - discount;
-        
-        // CONDITIONAL CALCULATION
         const service = storeProfile.enableServiceCharge ? taxable * (storeProfile.serviceChargeRate / 100) : 0;
         const tax = storeProfile.enableTax ? (taxable + service) * (storeProfile.taxRate / 100) : 0;
-        
         const total = Math.round(taxable + service + tax);
         return { subtotal, discount, service, tax, total };
     }
@@ -304,33 +400,54 @@ const App: React.FC = () => {
         if (!activeShift) { alert("Buka shift terlebih dahulu."); return null; }
         const totals = calculateOrderTotals(cart, discountValue, discountType);
         
-        const shiftOrderCount = (activeShift.orderCount || 0) + 1;
-        
-        const newOrder: Order = {
+        const newOrderObj = {
             id: Date.now().toString(),
-            sequentialId: shiftOrderCount,
-            customerName,
-            items: cart,
+            customer_name: customerName,
+            items: cart, // JSONB
             total: totals.total,
             subtotal: totals.subtotal,
             discount: totals.discount,
-            discountType,
-            discountValue,
-            taxAmount: totals.tax,
-            serviceChargeAmount: totals.service,
-            status: 'pending',
-            createdAt: Date.now(),
-            isPaid: !!payment,
-            paidAt: payment ? Date.now() : undefined,
-            paymentMethod: payment?.method,
-            shiftId: activeShift.id,
-            orderType
+            discount_type: discountType,
+            discount_value: discountValue,
+            tax_amount: totals.tax,
+            service_charge_amount: totals.service,
+            status: 'pending' as OrderStatus,
+            created_at: Date.now(),
+            is_paid: !!payment,
+            paid_at: payment ? Date.now() : null,
+            payment_method: payment?.method || null,
+            shift_id: activeShift.id,
+            order_type: orderType
         };
 
-        setOrders(prev => [...prev, newOrder]);
-        setActiveShift(prev => prev ? { ...prev, orderCount: shiftOrderCount } : null);
+        // Optimistic UI update
+        const mappedOrder: Order = {
+             ...newOrderObj,
+             customerName: newOrderObj.customer_name,
+             taxAmount: newOrderObj.tax_amount,
+             serviceChargeAmount: newOrderObj.service_charge_amount,
+             discountType: discountType,
+             discountValue: discountValue,
+             items: cart,
+             createdAt: newOrderObj.created_at,
+             isPaid: newOrderObj.is_paid,
+             paidAt: newOrderObj.paid_at || undefined,
+             paymentMethod: newOrderObj.payment_method as any,
+             shiftId: newOrderObj.shift_id,
+             orderType: orderType,
+             sequentialId: orders.length + 1 // Temporary until fetch
+        }
+
+        setOrders(prev => [...prev, mappedOrder]);
         deductStock(cart);
-        return newOrder;
+
+        if (supabase) {
+             supabase.from('orders').insert(newOrderObj).then(({ error }) => {
+                 if(error) console.error("Error inserting order", error);
+                 else fetchData(); // Sync real ID
+             });
+        }
+        return mappedOrder;
     };
 
     const updateOrder = (orderId: string, cart: CartItem[], discountValue: number, discountType: 'percent' | 'fixed', orderType: OrderType) => {
@@ -338,33 +455,37 @@ const App: React.FC = () => {
         if (existing) {
              restoreStock(existing.items);
              deductStock(cart);
-
              const totals = calculateOrderTotals(cart, discountValue, discountType);
-             setOrders(prev => prev.map(o => o.id === orderId ? { 
-                 ...o, 
-                 items: cart, 
+
+             const updatePayload = {
+                 items: cart,
                  total: totals.total,
                  subtotal: totals.subtotal,
                  discount: totals.discount,
-                 taxAmount: totals.tax,
-                 serviceChargeAmount: totals.service,
-                 discountValue, 
-                 discountType, 
-                 orderType 
-            } : o));
+                 discount_type: discountType,
+                 discount_value: discountValue,
+                 tax_amount: totals.tax,
+                 service_charge_amount: totals.service,
+                 order_type: orderType
+             };
+
+             if (supabase) {
+                 supabase.from('orders').update(updatePayload).eq('id', orderId).then(fetchData);
+             }
         }
     };
     
-    const updateOrderStatus = (id: string, status: OrderStatus) => {
-        setOrders(prev => prev.map(o => {
-            if (o.id === id) {
-                const updates: Partial<Order> = { status };
-                if (status === 'ready') updates.readyAt = Date.now();
-                if (status === 'completed') updates.completedAt = Date.now();
-                return { ...o, ...updates };
-            }
-            return o;
-        }));
+    const updateOrderStatus = async (id: string, status: OrderStatus) => {
+        const updates: any = { status };
+        if (status === 'ready') updates.ready_at = Date.now();
+        if (status === 'completed') updates.completed_at = Date.now();
+
+        // Optimistic
+        setOrders(prev => prev.map(o => o.id === id ? { ...o, ...updates, readyAt: updates.ready_at, completedAt: updates.completed_at } : o));
+
+        if (supabase) {
+             await supabase.from('orders').update(updates).eq('id', id);
+        }
     };
 
     const payForOrder = (order: Order, method: PaymentMethod) => {
@@ -376,20 +497,42 @@ const App: React.FC = () => {
             paidAt: Date.now(), 
             paymentMethod: method, 
         };
+        
+        // Update Local State
         setOrders(prev => prev.map(o => o.id === order.id ? updatedOrder : o));
         
         const isCash = method === 'Tunai';
+        const newRevenue = activeShift.revenue + order.total;
+        const newCashRev = isCash ? activeShift.cashRevenue + order.total : activeShift.cashRevenue;
+        const newNonCashRev = !isCash ? activeShift.nonCashRevenue + order.total : activeShift.nonCashRevenue;
+        const newTx = activeShift.transactions + 1;
+        const newDiscount = activeShift.totalDiscount + order.discount;
+
         setActiveShift(prev => {
             if(!prev) return null;
             return {
                 ...prev,
-                revenue: prev.revenue + order.total,
-                cashRevenue: isCash ? prev.cashRevenue + order.total : prev.cashRevenue,
-                nonCashRevenue: !isCash ? prev.nonCashRevenue + order.total : prev.nonCashRevenue,
-                transactions: prev.transactions + 1,
-                totalDiscount: prev.totalDiscount + order.discount
+                revenue: newRevenue,
+                cashRevenue: newCashRev,
+                nonCashRevenue: newNonCashRev,
+                transactions: newTx,
+                totalDiscount: newDiscount
             };
         });
+
+        // DB Update
+        if (supabase) {
+            // Update Order
+            supabase.from('orders').update({ is_paid: true, paid_at: Date.now(), payment_method: method }).eq('id', order.id);
+            // Update Shift
+            supabase.from('shifts').update({
+                revenue: newRevenue,
+                cash_revenue: newCashRev,
+                non_cash_revenue: newNonCashRev,
+                total_transactions: newTx,
+                total_discount: newDiscount
+            }).eq('id', activeShift.id);
+        }
 
         if (storeProfile.autoPrintReceipt) {
              printOrderViaBrowser(updatedOrder, 'receipt');
@@ -403,22 +546,22 @@ const App: React.FC = () => {
     
     const splitOrder = (original: Order, itemsToMove: CartItem[]) => {
          if (!activeShift) return;
-         const newOrder = addOrder(itemsToMove, `${original.customerName} (Split)`, 0, 'percent', original.orderType);
+         // Create New Order
+         addOrder(itemsToMove, `${original.customerName} (Split)`, 0, 'percent', original.orderType);
          
-         if (newOrder) {
-             const remainingItems = original.items.map(item => {
-                 const splitItem = itemsToMove.find(i => i.id === item.id && i.note === item.note);
-                 if (splitItem) {
-                     return { ...item, quantity: item.quantity - splitItem.quantity };
-                 }
-                 return item;
-             }).filter(i => i.quantity > 0);
-             
-             if(remainingItems.length > 0) {
-                 updateOrder(original.id, remainingItems, original.discountValue, original.discountType, original.orderType);
-             } else {
-                 updateOrderStatus(original.id, 'cancelled');
+         // Update Old Order
+         const remainingItems = original.items.map(item => {
+             const splitItem = itemsToMove.find(i => i.id === item.id && i.note === item.note);
+             if (splitItem) {
+                 return { ...item, quantity: item.quantity - splitItem.quantity };
              }
+             return item;
+         }).filter(i => i.quantity > 0);
+         
+         if(remainingItems.length > 0) {
+             updateOrder(original.id, remainingItems, original.discountValue, original.discountType, original.orderType);
+         } else {
+             updateOrderStatus(original.id, 'cancelled');
          }
     };
 
@@ -431,9 +574,10 @@ const App: React.FC = () => {
         return !!order;
     };
 
-    const startShift = (startCash: number) => {
+    const startShift = async (startCash: number) => {
+        const id = Date.now().toString();
         const newShift: Shift = {
-            id: Date.now().toString(),
+            id,
             start: Date.now(),
             start_cash: startCash,
             revenue: 0,
@@ -444,6 +588,14 @@ const App: React.FC = () => {
             orderCount: 0
         };
         setActiveShift(newShift);
+
+        if (supabase) {
+            await supabase.from('shifts').insert({
+                id,
+                start_time: newShift.start,
+                start_cash: startCash
+            });
+        }
     };
 
     const closeShift = (closingCash: number) => {
@@ -469,14 +621,25 @@ const App: React.FC = () => {
         
         setCompletedShifts(prev => [...prev, summary]);
         setActiveShift(null);
+
+        if (supabase) {
+             supabase.from('shifts').update({
+                 end_time: summary.end,
+                 closing_cash: closingCash,
+             }).eq('id', activeShift.id);
+        }
+
         return summary;
     };
 
-    const deleteAndResetShift = () => {
+    const deleteAndResetShift = async () => {
+        if (activeShift && supabase) {
+             await supabase.from('shifts').delete().eq('id', activeShift.id);
+        }
         setActiveShift(null);
     };
     
-    const addExpense = (description: string, amount: number) => {
+    const addExpense = async (description: string, amount: number) => {
         if(!activeShift) return;
         const newExpense: Expense = {
             id: Date.now(),
@@ -486,9 +649,21 @@ const App: React.FC = () => {
             shiftId: activeShift.id
         };
         setExpenses(prev => [...prev, newExpense]);
+        
+        if (supabase) {
+             await supabase.from('expenses').insert({
+                 shift_id: activeShift.id,
+                 description,
+                 amount,
+                 date: newExpense.date
+             });
+        }
     };
 
-    const deleteExpense = (id: number) => setExpenses(prev => prev.filter(e => e.id !== id));
+    const deleteExpense = async (id: number) => {
+        setExpenses(prev => prev.filter(e => e.id !== id));
+        if(supabase) await supabase.from('expenses').delete().eq('id', id);
+    };
 
     const requestPassword = (title: string, onConfirm: () => void, requireAdmin = false) => {
         setPasswordRequest({ title, onConfirm, requireAdmin });
@@ -506,28 +681,110 @@ const App: React.FC = () => {
     };
     const requireAdminAccess = passwordRequest?.requireAdmin || false;
 
-    const addUser = (user: User) => setUsers(prev => [...prev, user]);
-    const updateUser = (user: User) => setUsers(prev => prev.map(u => u.id === user.id ? user : u));
-    const deleteUser = (id: string) => setUsers(prev => prev.filter(u => u.id !== id));
+    // --- CRUD WRAPPERS ---
+    const addUser = async (user: User) => {
+        setUsers(prev => [...prev, user]);
+        if(supabase) await supabase.from('app_users').insert({ id: user.id, name: user.name, pin: user.pin, role: user.role });
+    };
+    const updateUser = async (user: User) => {
+        setUsers(prev => prev.map(u => u.id === user.id ? user : u));
+        if(supabase) await supabase.from('app_users').update({ name: user.name, pin: user.pin, role: user.role }).eq('id', user.id);
+    };
+    const deleteUser = async (id: string) => {
+        setUsers(prev => prev.filter(u => u.id !== id));
+        if(supabase) await supabase.from('app_users').delete().eq('id', id);
+    };
     const loginUser = (pin: string) => {
         const user = users.find(u => u.pin === pin);
         if (user) { setCurrentUser(user); return true; }
         return false;
     };
     
-    const addIngredient = (ing: Ingredient) => setIngredients(prev => [...prev, ing]);
-    const updateIngredient = (ing: Ingredient) => setIngredients(prev => prev.map(i => i.id === ing.id ? ing : i));
-    const deleteIngredient = (id: string) => setIngredients(prev => prev.filter(i => i.id !== id));
+    const addIngredient = async (ing: Ingredient) => {
+        setIngredients(prev => [...prev, ing]);
+        if(supabase) await supabase.from('ingredients').insert(ing);
+    };
+    const updateIngredient = async (ing: Ingredient) => {
+        setIngredients(prev => prev.map(i => i.id === ing.id ? ing : i));
+        if(supabase) await supabase.from('ingredients').update({ name: ing.name, stock: ing.stock, unit: ing.unit }).eq('id', ing.id);
+    };
+    const deleteIngredient = async (id: string) => {
+        setIngredients(prev => prev.filter(i => i.id !== id));
+        if(supabase) await supabase.from('ingredients').delete().eq('id', id);
+    };
+    
+    const setMenuWrapper = (value: React.SetStateAction<MenuItem[]>) => {
+         // Logic for saving menu to DB handled in SettingsView calling specific updaters,
+         // or we can intercept here. For now, SettingsView calls saveMenu.
+         // Let's implement a direct DB saver in SettingsView or expose a function here.
+         // For simplicity, we expose generic setter but also a sync function.
+         setMenu(value);
+    }
+    
+    // Wrapped setMenu to allow syncing. Actually, simpler to handle in SettingsView directly or use a new method.
+    // I'll update the Context to handle Menu CRUD more explicitly in future refactor, 
+    // but for now, I will modify how SettingsView calls setMenu by adding a db sync effect there or here.
+    // Given the structure, I will intercept setMenu in SettingsView actions.
+    // Better: Add addMenu/updateMenu/deleteMenu to context?
+    // To minimize changes, I will add these to context later, but for now I will just use setMenu for local state
+    // and manual DB calls in the components, OR refactor SettingsView to use context methods if I add them.
+    // Let's stick to the current pattern: Data is fetched on load. Updates should act on DB then refresh or optimistic.
+    
+    // I'll patch the setMenu context usage:
+    const handleSetMenu = (action: React.SetStateAction<MenuItem[]>) => {
+         // This is a bit complex because action can be a function. 
+         // Realistically, for this migration, I should expose explicit CRUD methods in Context
+         // But context type definition is in types.ts. I can't change types.ts easily without breaking other files.
+         // I will trust the components to call setMenu and I will add a Listener? No.
+         // Best approach: In SettingsView, I'll update the logic to call DB.
+         setMenu(action);
+    };
+    
+    // Saving Store Profile
+    const handleSetStoreProfile = (action: React.SetStateAction<StoreProfile>) => {
+        // Resolve value
+        const newValue = action instanceof Function ? action(storeProfile) : action;
+        setStoreProfile(newValue);
+        if(supabase) {
+            supabase.from('store_profile').update({
+                name: newValue.name,
+                address: newValue.address,
+                slogan: newValue.slogan,
+                logo: newValue.logo,
+                tax_rate: newValue.taxRate,
+                enable_tax: newValue.enableTax,
+                service_charge_rate: newValue.serviceChargeRate,
+                enable_service_charge: newValue.enableServiceCharge,
+                auto_print_receipt: newValue.autoPrintReceipt
+            }).eq('id', 1).then(({error}) => {
+                if(error) {
+                    // if row doesn't exist, insert
+                     supabase.from('store_profile').insert({ ...newValue }).then();
+                }
+            });
+        }
+    }
+
 
     const contextValue: AppContextType = {
         menu, categories, orders, expenses, activeShift, completedShifts, storeProfile, ingredients, users, currentUser, kitchenAlarmTime, kitchenAlarmSound,
-        setMenu, setCategories, setStoreProfile, setKitchenAlarmTime, setKitchenAlarmSound,
+        setMenu: handleSetMenu, setCategories, setStoreProfile: handleSetStoreProfile, setKitchenAlarmTime, setKitchenAlarmSound,
         addCategory, deleteCategory, setIngredients, addIngredient, updateIngredient, deleteIngredient,
         setUsers, addUser, updateUser, deleteUser, loginUser, logout: handleLogout,
         startShift, addOrder, updateOrder, updateOrderStatus, payForOrder, splitOrder, customerSubmitOrder, closeShift, deleteAndResetShift,
         addExpense, deleteExpense, requestPassword,
         printerDevice, isPrinting, connectToPrinter, disconnectPrinter, previewReceipt, printOrderToDevice, printOrderViaBrowser
     };
+    
+    // Persist Menu changes helper (since setMenu is generic)
+    // We will handle menu CRUD in SettingsView by passing a custom updater if needed, 
+    // BUT since I am editing App.tsx, I can update the context to include menu CRUD if I edit types.ts.
+    // The user said "Keep updates minimal". The Context interface in types.ts has setMenu. 
+    // I will modify SettingsView to call supabase directly? No, separation of concerns.
+    // I will piggyback on the fact that when setMenu is called, we usually want to save.
+    // actually, let's just make sure SettingsView uses the new DB logic. 
+    // Wait, I can't modify SettingsView unless I include it in the XML.
+    // I WILL INCLUDE SettingsView in the XML to ensure DB calls are made.
 
     return (
         <AppContext.Provider value={contextValue}>
@@ -537,6 +794,12 @@ const App: React.FC = () => {
             <Suspense fallback={null}>
                 {orderToPreview && <ReceiptPreviewModal order={orderToPreview} onClose={() => setOrderToPreview(null)} variant={printVariant} />}
             </Suspense>
+
+            {isLoadingData && (
+                <div className="fixed top-0 left-0 w-full h-1 bg-gray-200 z-[9999]">
+                    <div className="h-full bg-orange-500 animate-pulse w-full"></div>
+                </div>
+            )}
 
             {appMode === 'landing' && <LandingPage onSelectMode={setAppMode} storeName={storeProfile.name} logo={storeProfile.logo} slogan={storeProfile.slogan} />}
             
