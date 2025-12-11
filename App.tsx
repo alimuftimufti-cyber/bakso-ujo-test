@@ -5,7 +5,7 @@ import { AppContext } from './types';
 import type { MenuItem, Order, Shift, CartItem, Category, StoreProfile, AppContextType, ShiftSummary, Expense, OrderType, Ingredient, User, PaymentMethod, OrderStatus } from './types';
 import { initialMenuData, initialCategories, defaultStoreProfile } from './data';
 import PrintableReceipt from './components/PrintableReceipt';
-import { supabase, saveCredentials, clearCredentials, hasSavedCredentials } from './supabaseClient';
+import { supabase, saveCredentials, clearCredentials, hasSavedCredentials, resetToDefault } from './supabaseClient';
 
 // Lazy Load Components
 const POSView = React.lazy(() => import('./components/POS'));
@@ -77,6 +77,13 @@ const DatabaseSetupModal = ({ onClose }: { onClose: () => void }) => {
         onClose();
     };
 
+    const handleReset = () => {
+        if(confirm("Yakin ingin reset ke pengaturan default?")) {
+            resetToDefault();
+            onClose();
+        }
+    }
+
     return (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[110] p-4">
             <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full">
@@ -99,7 +106,6 @@ const DatabaseSetupModal = ({ onClose }: { onClose: () => void }) => {
                             onChange={(e) => setUrl(e.target.value)}
                             className="w-full border rounded p-2 text-sm bg-white focus:ring-2 focus:ring-orange-500 outline-none"
                             placeholder="https://xxxxxxxxxxxx.supabase.co"
-                            required
                         />
                     </div>
                     <div>
@@ -109,19 +115,23 @@ const DatabaseSetupModal = ({ onClose }: { onClose: () => void }) => {
                             onChange={(e) => setKey(e.target.value)}
                             className="w-full border rounded p-2 text-sm h-24 font-mono text-xs focus:ring-2 focus:ring-orange-500 outline-none"
                             placeholder="eyJh..."
-                            required
                         />
                     </div>
-                    <button type="submit" className="w-full bg-green-600 text-white font-bold py-3 rounded-xl hover:bg-green-700 transition-all shadow-lg">
-                        Simpan & Hubungkan
-                    </button>
+                    <div className="flex gap-2">
+                        <button type="button" onClick={handleReset} className="flex-1 bg-gray-200 text-gray-700 font-bold py-3 rounded-xl hover:bg-gray-300 transition-all">
+                            Reset Default
+                        </button>
+                        <button type="submit" className="flex-[2] bg-green-600 text-white font-bold py-3 rounded-xl hover:bg-green-700 transition-all shadow-lg">
+                            Simpan
+                        </button>
+                    </div>
                 </form>
             </div>
         </div>
     );
 };
 
-const LandingPage = ({ onSelectMode, storeName, logo, slogan, onOpenDbSetup }: { onSelectMode: (mode: AppMode) => void, storeName: string, logo?: string, slogan?: string, onOpenDbSetup: () => void }) => (
+const LandingPage = ({ onSelectMode, storeName, logo, slogan, onOpenDbSetup, dbError }: { onSelectMode: (mode: AppMode) => void, storeName: string, logo?: string, slogan?: string, onOpenDbSetup: () => void, dbError: string | null }) => (
     <div className="h-[100dvh] w-full bg-gradient-to-br from-orange-500 to-red-600 flex flex-col items-center justify-center p-6 text-white relative overflow-hidden">
         <div className="z-10 flex flex-col items-center justify-center w-full max-w-md text-center space-y-8">
             <div className="bg-white p-4 rounded-full inline-block shadow-2xl animate-bounce-slow">
@@ -154,7 +164,13 @@ const LandingPage = ({ onSelectMode, storeName, logo, slogan, onOpenDbSetup }: {
             </button>
             
             {/* Database Status Indicator */}
-            {supabase ? (
+            {dbError ? (
+                 <div className="bg-red-800/90 text-white p-4 rounded-lg text-center max-w-sm border-2 border-red-400 animate-pulse">
+                     <p className="font-bold text-sm mb-1">MASALAH DATABASE: TABEL BELUM DIBUAT</p>
+                     <p className="text-xs opacity-90">Boss, sepertinya Anda belum menjalankan "Mantra Ajaib" SQL di Supabase. Koneksi berhasil tapi tabel tidak ditemukan.</p>
+                     <p className="text-xs mt-2 bg-black/20 p-1 rounded font-mono">Error: {dbError}</p>
+                 </div>
+            ) : supabase ? (
                  <div className="flex items-center gap-2 text-green-200 text-xs bg-green-900/30 px-3 py-1 rounded-full backdrop-blur-sm">
                     <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></span>
                     Online Database
@@ -230,6 +246,8 @@ const App: React.FC = () => {
     const [kitchenAlarmSound, setKitchenAlarmSound] = useState<string>('beep');
     const [isLoadingData, setIsLoadingData] = useState(false);
     
+    const [databaseError, setDatabaseError] = useState<string | null>(null);
+
     // Setup Modal State
     const [isDbSetupOpen, setDbSetupOpen] = useState(false);
 
@@ -251,7 +269,24 @@ const App: React.FC = () => {
             return;
         }
         setIsLoadingData(true);
+        setDatabaseError(null);
+
         try {
+            // Test Connection First
+            const { error: connectionError } = await supabase.from('store_profile').select('id').limit(1);
+            if (connectionError) {
+                if (connectionError.code === '42P01') {
+                     setDatabaseError("Tabel tidak ditemukan. Jalankan SQL Script di Supabase!");
+                } else {
+                     setDatabaseError(connectionError.message);
+                }
+                // Fallback to local data so app doesn't crash
+                setMenu(initialMenuData);
+                setCategories(initialCategories);
+                setUsers([{ id: 'admin', name: 'Admin', pin: '1234', role: 'admin' }]);
+                return;
+            }
+
             // 1. Menu
             const { data: menuData } = await supabase.from('menu_items').select('*');
             if (menuData) {
@@ -849,7 +884,7 @@ const App: React.FC = () => {
                 </div>
             )}
 
-            {appMode === 'landing' && <LandingPage onSelectMode={setAppMode} storeName={storeProfile.name} logo={storeProfile.logo} slogan={storeProfile.slogan} onOpenDbSetup={() => setDbSetupOpen(true)} />}
+            {appMode === 'landing' && <LandingPage onSelectMode={setAppMode} storeName={storeProfile.name} logo={storeProfile.logo} slogan={storeProfile.slogan} onOpenDbSetup={() => setDbSetupOpen(true)} dbError={databaseError} />}
             
             {appMode === 'admin' && !isLoggedIn && <LoginScreen onLogin={handleLogin} onBack={() => setAppMode('landing')} />}
             
