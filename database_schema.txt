@@ -1,0 +1,186 @@
+-- ==========================================
+-- SKEMA DATABASE POS BAKSO UJO (SUPABASE)
+-- ==========================================
+-- Petunjuk:
+-- 1. Buka Dashboard Supabase project kamu.
+-- 2. Masuk ke menu "SQL Editor" di sidebar kiri.
+-- 3. Klik "New Query".
+-- 4. Copy semua isi file ini dan Paste di sana.
+-- 5. Klik tombol "Run" di pojok kanan bawah.
+
+-- 1. RESET DATABASE (MENGHAPUS DATA LAMA AGAR BERSIH)
+DROP TABLE IF EXISTS order_items CASCADE;
+DROP TABLE IF EXISTS orders CASCADE;
+DROP TABLE IF EXISTS attendance CASCADE;
+DROP TABLE IF EXISTS expenses CASCADE;
+DROP TABLE IF EXISTS shifts CASCADE;
+DROP TABLE IF EXISTS product_ingredients CASCADE;
+DROP TABLE IF EXISTS ingredients CASCADE;
+DROP TABLE IF EXISTS products CASCADE;
+DROP TABLE IF EXISTS categories CASCADE;
+DROP TABLE IF EXISTS users CASCADE;
+DROP TABLE IF EXISTS branches CASCADE;
+
+-- 2. MEMBUAT TABEL (STRUCTURE)
+
+-- Tabel Cabang
+CREATE TABLE branches (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    address TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- Tabel User (Pegawai)
+CREATE TABLE users (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    pin TEXT, -- PIN untuk Login Sistem
+    attendance_pin TEXT, -- PIN untuk Absensi
+    role TEXT NOT NULL CHECK (role IN ('owner', 'admin', 'cashier', 'kitchen', 'staff')),
+    branch_id TEXT REFERENCES branches(id),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- Tabel Kategori Menu
+CREATE TABLE categories (
+    id SERIAL PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL
+);
+
+-- Tabel Produk (Menu Makanan/Minuman)
+CREATE TABLE products (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    price NUMERIC NOT NULL,
+    category_id INTEGER REFERENCES categories(id),
+    image_url TEXT,
+    stock INTEGER DEFAULT 0, -- Stok barang jadi (opsional)
+    min_stock INTEGER DEFAULT 5,
+    is_active BOOLEAN DEFAULT true,
+    branch_id TEXT REFERENCES branches(id) -- Opsional: jika menu spesifik per cabang
+);
+
+-- Tabel Bahan Baku (Inventory)
+CREATE TABLE ingredients (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    unit TEXT NOT NULL, -- gram, ml, pcs, dll
+    stock NUMERIC DEFAULT 0,
+    min_stock NUMERIC DEFAULT 5,
+    type TEXT CHECK (type IN ('raw', 'spice', 'packaging', 'equipment', 'other')),
+    branch_id TEXT REFERENCES branches(id)
+);
+
+-- Tabel Shift (Sesi Kasir)
+CREATE TABLE shifts (
+    id TEXT PRIMARY KEY,
+    branch_id TEXT REFERENCES branches(id),
+    start_time BIGINT NOT NULL,
+    end_time BIGINT,
+    start_cash NUMERIC NOT NULL,
+    closing_cash NUMERIC,
+    revenue NUMERIC DEFAULT 0,
+    cash_revenue NUMERIC DEFAULT 0,
+    non_cash_revenue NUMERIC DEFAULT 0,
+    total_expenses NUMERIC DEFAULT 0,
+    transactions_count INTEGER DEFAULT 0,
+    created_by TEXT REFERENCES users(id)
+);
+
+-- Tabel Pengeluaran Operasional
+CREATE TABLE expenses (
+    id SERIAL PRIMARY KEY,
+    shift_id TEXT REFERENCES shifts(id),
+    description TEXT NOT NULL,
+    amount NUMERIC NOT NULL,
+    created_at BIGINT NOT NULL
+);
+
+-- Tabel Pesanan (Orders)
+CREATE TABLE orders (
+    id TEXT PRIMARY KEY,
+    sequential_id SERIAL, -- Nomor urut harian
+    branch_id TEXT REFERENCES branches(id),
+    shift_id TEXT,
+    customer_name TEXT NOT NULL,
+    type TEXT NOT NULL CHECK (type IN ('Dine In', 'Take Away')),
+    status TEXT NOT NULL DEFAULT 'pending', -- pending, ready, completed, cancelled
+    payment_method TEXT, -- Tunai, QRIS, Debit
+    payment_status TEXT DEFAULT 'unpaid',
+    
+    -- Data Keuangan
+    subtotal NUMERIC NOT NULL,
+    discount NUMERIC DEFAULT 0,
+    tax NUMERIC DEFAULT 0,
+    service NUMERIC DEFAULT 0,
+    total NUMERIC NOT NULL,
+    
+    created_at BIGINT NOT NULL,
+    completed_at BIGINT,
+    
+    -- Supabase Realtime Requirement
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
+);
+
+-- Tabel Item dalam Pesanan (Detail Order)
+CREATE TABLE order_items (
+    id SERIAL PRIMARY KEY,
+    order_id TEXT REFERENCES orders(id),
+    product_id INTEGER REFERENCES products(id),
+    product_name TEXT NOT NULL, -- Snapshot nama saat transaksi (agar historis aman jika menu ganti nama)
+    price NUMERIC NOT NULL, -- Snapshot harga saat transaksi
+    quantity INTEGER NOT NULL,
+    note TEXT
+);
+
+-- Tabel Absensi
+CREATE TABLE attendance (
+    id TEXT PRIMARY KEY,
+    user_id TEXT REFERENCES users(id),
+    user_name TEXT NOT NULL,
+    branch_id TEXT REFERENCES branches(id),
+    date TEXT NOT NULL, -- Format YYYY-MM-DD
+    clock_in BIGINT NOT NULL,
+    clock_out BIGINT,
+    status TEXT DEFAULT 'Present',
+    photo_url TEXT, -- Base64 atau URL foto
+    lat NUMERIC,
+    lng NUMERIC
+);
+
+-- 3. MENGAKTIFKAN REALTIME (SUPABASE)
+-- Agar pesanan masuk ke dapur secara instan tanpa refresh
+ALTER PUBLICATION supabase_realtime ADD TABLE orders;
+ALTER PUBLICATION supabase_realtime ADD TABLE order_items;
+ALTER PUBLICATION supabase_realtime ADD TABLE branches;
+
+-- 4. MEMASUKKAN DATA AWAL (SEEDING)
+
+-- Data Cabang
+INSERT INTO branches (id, name, address) VALUES
+('pusat', 'Pusat (Main)', 'Jl. Utama No. 1'),
+('cabang-1', 'Cabang 1 (Pasar)', 'Jl. Pasar Baru No. 5');
+
+-- Data Kategori
+INSERT INTO categories (name) VALUES
+('Bakso'), ('Mie Ayam'), ('Tambahan'), ('Makanan'), ('Kriuk'), ('Minuman');
+
+-- Data Produk (Contoh Menu)
+INSERT INTO products (name, price, category_id, image_url) VALUES
+('Bakso Polos', 15000, (SELECT id FROM categories WHERE name = 'Bakso'), 'https://picsum.photos/400/300?random=1'),
+('Bakso Komplit', 23000, (SELECT id FROM categories WHERE name = 'Bakso'), 'https://picsum.photos/400/300?random=2'),
+('Bakso Urat Gimbal', 25000, (SELECT id FROM categories WHERE name = 'Bakso'), 'https://picsum.photos/400/300?random=4'),
+('Mie Ayam', 15000, (SELECT id FROM categories WHERE name = 'Mie Ayam'), 'https://picsum.photos/400/300?random=8'),
+('Mie Ayam Bakso', 20000, (SELECT id FROM categories WHERE name = 'Mie Ayam'), 'https://picsum.photos/400/300?random=9'),
+('Nasi Putih', 5000, (SELECT id FROM categories WHERE name = 'Tambahan'), 'https://picsum.photos/400/300?random=14'),
+('Kerupuk Kaleng', 2000, (SELECT id FROM categories WHERE name = 'Kriuk'), 'https://picsum.photos/400/300?random=22'),
+('Es Teh Manis', 5000, (SELECT id FROM categories WHERE name = 'Minuman'), 'https://picsum.photos/400/300?random=26'),
+('Es Jeruk', 7000, (SELECT id FROM categories WHERE name = 'Minuman'), 'https://picsum.photos/400/300?random=28');
+
+-- Data User (Admin Awal)
+INSERT INTO users (id, name, pin, attendance_pin, role, branch_id) VALUES
+('owner-1', 'Super Owner', '9999', '9999', 'owner', 'pusat'),
+('admin-pusat', 'Admin Pusat', '1234', '1111', 'admin', 'pusat');
+
+-- SCRIPT SELESAI
