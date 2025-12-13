@@ -10,8 +10,6 @@ export const currentProjectId = "Supabase Project";
 const handleError = (error: any, context: string) => {
     if (error) {
         console.error(`Error in ${context}:`, error);
-        // Kita log error tapi tidak throw agar UI tidak crash total, 
-        // namun di production sebaiknya di handle lebih baik.
         console.warn(error.message);
     }
 };
@@ -130,7 +128,6 @@ export const deleteCategoryFromCloud = async (name: string) => {
 // ==========================================
 
 export const getMenuFromCloud = async (branchId: string): Promise<MenuItem[]> => {
-    // Ambil produk global (tidak punya branch_id) ATAU produk khusus branch ini
     const { data, error } = await supabase
         .from('products')
         .select(`
@@ -154,7 +151,6 @@ export const getMenuFromCloud = async (branchId: string): Promise<MenuItem[]> =>
 };
 
 export const addProductToCloud = async (item: MenuItem, branchId: string) => {
-    // Cari category_id berdasarkan nama
     const { data: catData } = await supabase.from('categories').select('id').eq('name', item.category).single();
     
     if (!catData) {
@@ -170,14 +166,12 @@ export const addProductToCloud = async (item: MenuItem, branchId: string) => {
         stock: item.stock,
         min_stock: item.minStock,
         is_active: true,
-        branch_id: null // Set null untuk global menu, atau branchId untuk spesifik
+        branch_id: null 
     };
 
     if (item.id && typeof item.id === 'number' && item.id < 1000000000) {
-        // Update jika ID valid (kecil kemungkinan konflik dengan timestamp JS)
         await supabase.from('products').update(payload).eq('id', item.id);
     } else {
-        // Insert baru
         await supabase.from('products').insert(payload);
     }
 };
@@ -211,8 +205,10 @@ const mapToAppOrder = (dbOrder: any): Order => {
         taxAmount: dbOrder.tax || 0,
         serviceChargeAmount: dbOrder.service || 0,
         status: dbOrder.status,
-        createdAt: new Date(dbOrder.created_at).getTime(),
-        completedAt: dbOrder.completed_at ? new Date(dbOrder.completed_at).getTime() : undefined,
+        // created_at is BIGINT (ms) in DB schema
+        createdAt: Number(dbOrder.created_at),
+        completedAt: dbOrder.completed_at ? Number(dbOrder.completed_at) : undefined,
+        // updated_at is TIMESTAMPZ, so new Date() parses it correctly
         paidAt: dbOrder.payment_status === 'paid' ? new Date(dbOrder.updated_at).getTime() : undefined,
         isPaid: dbOrder.payment_status === 'paid',
         paymentMethod: dbOrder.payment_method,
@@ -250,6 +246,7 @@ export const subscribeToOrders = (branchId: string, onUpdate: (orders: Order[]) 
 
 export const addOrderToCloud = async (order: Order) => {
     // 1. Insert Order Header
+    // SCHEMA: created_at is BIGINT, send as number (timestamp ms)
     const { error: orderError } = await supabase.from('orders').insert({
         id: order.id,
         branch_id: order.branchId,
@@ -264,7 +261,7 @@ export const addOrderToCloud = async (order: Order) => {
         tax: order.taxAmount,
         service: order.serviceChargeAmount,
         total: order.total,
-        created_at: new Date(order.createdAt).toISOString()
+        created_at: order.createdAt // Send number, not ISO String
     });
 
     if (orderError) {
@@ -291,10 +288,11 @@ export const updateOrderInCloud = async (orderId: string, data: Partial<Order>) 
     if (data.status) updates.status = data.status;
     if (data.isPaid !== undefined) updates.payment_status = data.isPaid ? 'paid' : 'unpaid';
     if (data.paymentMethod) updates.payment_method = data.paymentMethod;
-    if (data.completedAt) updates.completed_at = new Date(data.completedAt).toISOString();
+    // SCHEMA: completed_at is BIGINT
+    if (data.completedAt) updates.completed_at = data.completedAt; 
     
     if (Object.keys(updates).length > 0) {
-        updates.updated_at = new Date().toISOString();
+        updates.updated_at = new Date().toISOString(); // TIMESTAMPZ
         await supabase.from('orders').update(updates).eq('id', orderId);
     }
 };
@@ -313,8 +311,8 @@ export const subscribeToAttendance = (branchId: string, onUpdate: (data: Attenda
                 userName: r.user_name,
                 branchId: r.branch_id,
                 date: r.date,
-                clockInTime: r.clock_in,
-                clockOutTime: r.clock_out,
+                clockInTime: Number(r.clock_in), // BIGINT
+                clockOutTime: r.clock_out ? Number(r.clock_out) : undefined, // BIGINT
                 status: r.status,
                 photoUrl: r.photo_url,
                 location: r.lat ? { lat: r.lat, lng: r.lng } : undefined
@@ -332,7 +330,7 @@ export const addAttendanceToCloud = async (record: AttendanceRecord) => {
         user_name: record.userName,
         branch_id: record.branchId,
         date: record.date,
-        clock_in: record.clockInTime,
+        clock_in: record.clockInTime, // BIGINT
         status: record.status,
         photo_url: record.photoUrl,
         lat: record.location?.lat,
@@ -341,12 +339,12 @@ export const addAttendanceToCloud = async (record: AttendanceRecord) => {
 };
 
 export const updateAttendanceInCloud = async (id: string, data: Partial<AttendanceRecord>, branchId: string) => {
-    await supabase.from('attendance').update({
-        clock_out: data.clockOutTime,
-        status: data.status
-    }).eq('id', id);
+    const updates: any = {};
+    if (data.clockOutTime) updates.clock_out = data.clockOutTime; // BIGINT
+    if (data.status) updates.status = data.status;
+
+    await supabase.from('attendance').update(updates).eq('id', id);
 };
 
-// Legacy stubs to prevent errors if still called
 export const subscribeToMasterData = (branchId: string, type: string, cb: any) => { return () => {} };
 export const syncMasterData = async () => {};
