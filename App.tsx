@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, Suspense, useRef, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AppContext } from './types'; 
@@ -5,7 +6,7 @@ import type { MenuItem, Order, Shift, CartItem, Category, StoreProfile, AppConte
 import { initialMenuData, initialCategories, defaultStoreProfile, initialBranches } from './data';
 import PrintableReceipt from './components/PrintableReceipt';
 import { printOrder, printShift } from './services/printerService';
-// IMPORT SYNC PENDING DATA
+// IMPORT DATABASE SERVICE (SUPABASE ADAPTER)
 import { subscribeToOrders, addOrderToCloud, updateOrderInCloud, syncMasterData, subscribeToMasterData, isFirebaseReady, subscribeToAttendance, addAttendanceToCloud, updateAttendanceInCloud, setStoreStatus, subscribeToStoreStatus, currentProjectId, syncPendingData } from './services/firebase';
 
 // Lazy Load Components
@@ -35,7 +36,7 @@ const Icons = {
     Attendance: () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg> // NEW ICON
 };
 
-// ... ErrorBoundary, useLocalStorage, PasswordModal, OfflineIndicator, ConfigWarning, LandingPage ...
+// ... ErrorBoundary, useLocalStorage, PasswordModal, OfflineIndicator ...
 
 // --- ERROR BOUNDARY ---
 interface ErrorBoundaryProps { children?: React.ReactNode; }
@@ -110,37 +111,6 @@ const OfflineIndicator = () => {
     if (isOnline) return null;
     return <div className="fixed bottom-0 left-0 right-0 bg-red-600 text-white text-center py-2 px-4 z-[999] text-xs font-bold animate-pulse pb-safe">⚠️ Koneksi Internet Terputus (Mode Offline)</div>;
 };
-
-// UPDATED: Config Warning Banner
-const ConfigWarning = () => {
-    const [connError, setConnError] = useState<string | null>(null);
-
-    useEffect(() => {
-        const handler = (e: any) => setConnError(e.detail);
-        window.addEventListener('firebase-connection-error', handler);
-        return () => window.removeEventListener('firebase-connection-error', handler);
-    }, []);
-
-    // If connection error detected
-    if (connError) {
-        return (
-            <div className="bg-red-600 text-white text-xs font-bold p-3 text-center sticky top-0 z-[100] shadow-md flex items-center justify-center gap-2">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
-                <span>{connError} - Aplikasi berjalan dalam Mode Offline (Data disimpan lokal).</span>
-            </div>
-        );
-    }
-
-    // If config missing entirely
-    if (isFirebaseReady) return null;
-    
-    return (
-        <div className="bg-orange-600 text-white text-xs font-bold p-3 text-center sticky top-0 z-[100] shadow-md flex items-center justify-center gap-2">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 animate-bounce" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
-            <span>MODE OFFLINE: Untuk fitur Online (QR/Dapur), isi Firebase Config di Vercel.</span>
-        </div>
-    );
-}
 
 // ... Rest of the file (LandingPage, LoginScreen, App component) remains exactly the same ...
 
@@ -684,7 +654,6 @@ const App: React.FC = () => {
     return (
         <ErrorBoundary>
             <AppContext.Provider value={contextValue}>
-                <ConfigWarning />
                 <OfflineIndicator />
                 {passwordRequest && <PasswordModal title={passwordRequest.title} onConfirm={handlePasswordConfirm} onCancel={() => setPasswordRequest(null)} theme={themeColor} />}
                 
