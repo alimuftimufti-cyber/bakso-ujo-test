@@ -1,4 +1,4 @@
-
+/// <reference types="vite/client" />
 import { createClient } from '@supabase/supabase-js';
 
 // Ambil environment variables dari Vercel/Vite
@@ -11,3 +11,4 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 // Export client untuk digunakan di seluruh aplikasi
 export const supabase = createClient(supabaseUrl || '', supabaseAnonKey || '');
+
