@@ -1,37 +1,218 @@
 
 import { supabase } from './supabaseClient';
-import type { Order, AttendanceRecord, MenuItem, Category, StoreProfile, Ingredient } from '../types';
+import type { Order, AttendanceRecord, MenuItem, Category, StoreProfile, Ingredient, Branch, User } from '../types';
 
-// --- HELPER: MAPPING DATA (APP <-> DB) ---
-// Aplikasi menggunakan camelCase (createdAt), Database SQL menggunakan snake_case (created_at).
-// Kita perlu mengubahnya agar cocok.
+// --- STATUS KONEKSI ---
+export const isFirebaseReady = true; 
+export const currentProjectId = "Supabase Project";
+
+// --- HELPERS ---
+const handleError = (error: any, context: string) => {
+    if (error) {
+        console.error(`Error in ${context}:`, error);
+        // Kita log error tapi tidak throw agar UI tidak crash total, 
+        // namun di production sebaiknya di handle lebih baik.
+        console.warn(error.message);
+    }
+};
+
+// --- SYNC PENDING DATA (Placeholder) ---
+export const syncPendingData = async (branchId: string) => {
+    // Logic sync jika perlu
+};
+
+// --- STORE STATUS ---
+export const setStoreStatus = async (branchId: string, isOpen: boolean) => {
+    // Opsional: Simpan status toko di DB
+    console.log(`Set store ${branchId} status: ${isOpen}`);
+};
+
+export const subscribeToStoreStatus = (branchId: string, onUpdate: (isOpen: boolean) => void) => {
+    onUpdate(true); // Default open
+    return () => {};
+};
+
+// ==========================================
+// 1. BRANCHES (CABANG)
+// ==========================================
+
+export const getBranchesFromCloud = async (): Promise<Branch[]> => {
+    const { data, error } = await supabase.from('branches').select('*');
+    handleError(error, 'getBranches');
+    return data || [];
+};
+
+export const addBranchToCloud = async (branch: Branch) => {
+    const { error } = await supabase.from('branches').insert({
+        id: branch.id,
+        name: branch.name,
+        address: branch.address
+    });
+    handleError(error, 'addBranch');
+};
+
+export const deleteBranchFromCloud = async (id: string) => {
+    const { error } = await supabase.from('branches').delete().eq('id', id);
+    handleError(error, 'deleteBranch');
+};
+
+// ==========================================
+// 2. USERS (PEGAWAI)
+// ==========================================
+
+export const getUsersFromCloud = async (branchId: string): Promise<User[]> => {
+    const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .or(`branch_id.eq.${branchId},role.eq.owner`);
+        
+    handleError(error, 'getUsers');
+    
+    return (data || []).map((u: any) => ({
+        id: u.id,
+        name: u.name,
+        pin: u.pin,
+        attendancePin: u.attendance_pin,
+        role: u.role as any,
+        branchId: u.branch_id
+    }));
+};
+
+export const addUserToCloud = async (user: User) => {
+    const { error } = await supabase.from('users').insert({
+        id: user.id,
+        name: user.name,
+        pin: user.pin,
+        attendance_pin: user.attendancePin,
+        role: user.role,
+        branch_id: user.branchId
+    });
+    handleError(error, 'addUser');
+};
+
+export const deleteUserFromCloud = async (id: string) => {
+    const { error } = await supabase.from('users').delete().eq('id', id);
+    handleError(error, 'deleteUser');
+};
+
+export const updateUserInCloud = async (user: User) => {
+    const { error } = await supabase.from('users').update({
+        name: user.name,
+        pin: user.pin,
+        attendance_pin: user.attendancePin,
+        role: user.role
+    }).eq('id', user.id);
+    handleError(error, 'updateUser');
+};
+
+// ==========================================
+// 3. CATEGORIES
+// ==========================================
+
+export const getCategoriesFromCloud = async (): Promise<Category[]> => {
+    const { data, error } = await supabase.from('categories').select('name');
+    handleError(error, 'getCategories');
+    return (data || []).map((c: any) => c.name);
+};
+
+export const addCategoryToCloud = async (name: string) => {
+    const { error } = await supabase.from('categories').insert({ name });
+    handleError(error, 'addCategory');
+};
+
+export const deleteCategoryFromCloud = async (name: string) => {
+    const { error } = await supabase.from('categories').delete().eq('name', name);
+    handleError(error, 'deleteCategory');
+};
+
+// ==========================================
+// 4. MENU / PRODUCTS
+// ==========================================
+
+export const getMenuFromCloud = async (branchId: string): Promise<MenuItem[]> => {
+    // Ambil produk global (tidak punya branch_id) ATAU produk khusus branch ini
+    const { data, error } = await supabase
+        .from('products')
+        .select(`
+            *,
+            categories (name)
+        `)
+        .eq('is_active', true)
+        .or(`branch_id.is.null,branch_id.eq.${branchId}`);
+
+    handleError(error, 'getMenu');
+
+    return (data || []).map((p: any) => ({
+        id: p.id,
+        name: p.name,
+        price: Number(p.price),
+        category: p.categories?.name || 'Umum',
+        imageUrl: p.image_url,
+        stock: p.stock,
+        minStock: p.min_stock
+    }));
+};
+
+export const addProductToCloud = async (item: MenuItem, branchId: string) => {
+    // Cari category_id berdasarkan nama
+    const { data: catData } = await supabase.from('categories').select('id').eq('name', item.category).single();
+    
+    if (!catData) {
+        console.error("Kategori tidak ditemukan untuk produk:", item.name);
+        return; 
+    }
+
+    const payload = {
+        name: item.name,
+        price: item.price,
+        category_id: catData.id,
+        image_url: item.imageUrl,
+        stock: item.stock,
+        min_stock: item.minStock,
+        is_active: true,
+        branch_id: null // Set null untuk global menu, atau branchId untuk spesifik
+    };
+
+    if (item.id && typeof item.id === 'number' && item.id < 1000000000) {
+        // Update jika ID valid (kecil kemungkinan konflik dengan timestamp JS)
+        await supabase.from('products').update(payload).eq('id', item.id);
+    } else {
+        // Insert baru
+        await supabase.from('products').insert(payload);
+    }
+};
+
+export const deleteProductFromCloud = async (id: number) => {
+    await supabase.from('products').update({ is_active: false }).eq('id', id);
+};
+
+// ==========================================
+// 5. ORDERS & TRANSACTIONS
+// ==========================================
 
 const mapToAppOrder = (dbOrder: any): Order => {
     return {
         id: dbOrder.id,
         sequentialId: dbOrder.sequential_id,
         customerName: dbOrder.customer_name,
-        // Supabase join returns order_items array, map it back to CartItem format
         items: dbOrder.order_items ? dbOrder.order_items.map((i: any) => ({
             id: i.product_id,
             name: i.product_name,
             price: i.price,
             quantity: i.quantity,
             note: i.note,
-            // Fallback defaults for CartItem requirements
             category: 'Uncategorized', 
         })) : [],
         total: dbOrder.total,
         subtotal: dbOrder.subtotal,
         discount: dbOrder.discount || 0,
-        discountType: 'percent', // Default logic as DB simplifies this
+        discountType: 'percent',
         discountValue: 0,
         taxAmount: dbOrder.tax || 0,
         serviceChargeAmount: dbOrder.service || 0,
         status: dbOrder.status,
-        createdAt: new Date(dbOrder.created_at).getTime(), // Convert ISO string back to Timestamp
+        createdAt: new Date(dbOrder.created_at).getTime(),
         completedAt: dbOrder.completed_at ? new Date(dbOrder.completed_at).getTime() : undefined,
-        readyAt: undefined, // SQL schema didn't have ready_at, optional logic
         paidAt: dbOrder.payment_status === 'paid' ? new Date(dbOrder.updated_at).getTime() : undefined,
         isPaid: dbOrder.payment_status === 'paid',
         paymentMethod: dbOrder.payment_method,
@@ -41,84 +222,36 @@ const mapToAppOrder = (dbOrder: any): Order => {
     };
 };
 
-// --- STATUS KONEKSI ---
-// Kita anggap "Ready" jika URL Supabase ada.
-export const isFirebaseReady = !!import.meta.env.VITE_SUPABASE_URL; 
-export const currentProjectId = "Supabase Project";
-
-// --- SYNC PENDING DATA ---
-// Supabase menangani offline sync via library-nya sendiri jika dikonfigurasi,
-// tapi untuk versi simpel ini kita anggap selalu online.
-export const syncPendingData = async (branchId: string) => {
-    console.log("Supabase Sync Check for branch:", branchId);
-};
-
-// --- STORE STATUS ---
-export const setStoreStatus = async (branchId: string, isOpen: boolean) => {
-    // Implementasi opsional: Simpan status buka/tutup di tabel branches jika kolom ada
-    // Saat ini kita skip atau log saja
-    console.log("Set Store Status:", isOpen);
-};
-
-export const subscribeToStoreStatus = (branchId: string, onUpdate: (isOpen: boolean) => void) => {
-    // Default open for now
-    onUpdate(true);
-    return () => {};
-};
-
-// --- ORDERS (CRUD) ---
-
 export const subscribeToOrders = (branchId: string, onUpdate: (orders: Order[]) => void) => {
     if (!branchId) return () => {};
 
     const fetchOrders = async () => {
         const { data, error } = await supabase
             .from('orders')
-            .select(`
-                *,
-                order_items (*)
-            `)
+            .select(`*, order_items (*)`)
             .eq('branch_id', branchId)
             .order('created_at', { ascending: false })
-            .limit(100); // Batasi 100 order terakhir agar ringan
+            .limit(50);
 
-        if (error) {
-            console.error("Error fetching orders:", error);
-            return;
-        }
-
-        if (data) {
-            const appOrders = data.map(mapToAppOrder);
-            onUpdate(appOrders);
+        if (!error && data) {
+            onUpdate(data.map(mapToAppOrder));
         }
     };
 
-    // 1. Initial Fetch
     fetchOrders();
 
-    // 2. Realtime Subscription
     const channel = supabase
         .channel(`realtime-orders-${branchId}`)
-        .on(
-            'postgres_changes',
-            { event: '*', schema: 'public', table: 'orders', filter: `branch_id=eq.${branchId}` },
-            (payload) => {
-                console.log('Realtime Change detected:', payload);
-                // Cara paling aman untuk konsistensi data relasional (order + items) 
-                // adalah refetch ulang saat ada perubahan pada tabel orders.
-                fetchOrders(); 
-            }
-        )
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `branch_id=eq.${branchId}` }, () => fetchOrders())
         .subscribe();
 
-    return () => {
-        supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
 };
 
 export const addOrderToCloud = async (order: Order) => {
-    const dbOrderPayload = {
-        id: order.id, // Gunakan ID dari frontend
+    // 1. Insert Order Header
+    const { error: orderError } = await supabase.from('orders').insert({
+        id: order.id,
         branch_id: order.branchId,
         shift_id: order.shiftId,
         customer_name: order.customerName,
@@ -132,49 +265,33 @@ export const addOrderToCloud = async (order: Order) => {
         service: order.serviceChargeAmount,
         total: order.total,
         created_at: new Date(order.createdAt).toISOString()
-    };
-
-    // 1. Insert Order Header
-    const { error: orderError } = await supabase
-        .from('orders')
-        .insert(dbOrderPayload);
+    });
 
     if (orderError) {
-        console.error("Error inserting order:", orderError);
-        return null;
+        console.error("Add Order Error", orderError);
+        return;
     }
 
-    // 2. Insert Order Items
-    const itemsPayload = order.items.map(item => ({
+    // 2. Insert Items
+    const items = order.items.map(item => ({
         order_id: order.id,
-        product_id: item.id, // Pastikan ID product integer jika skema integer
+        product_id: item.id,
         product_name: item.name,
         price: item.price,
         quantity: item.quantity,
         note: item.note
     }));
-
-    const { error: itemsError } = await supabase
-        .from('order_items')
-        .insert(itemsPayload);
-
-    if (itemsError) {
-        console.error("Error inserting items:", itemsError);
-    }
-
-    return order.id;
+    
+    const { error: itemsError } = await supabase.from('order_items').insert(items);
+    if (itemsError) console.error("Add Order Items Error", itemsError);
 };
 
 export const updateOrderInCloud = async (orderId: string, data: Partial<Order>) => {
-    // Mapping partial updates
     const updates: any = {};
     if (data.status) updates.status = data.status;
     if (data.isPaid !== undefined) updates.payment_status = data.isPaid ? 'paid' : 'unpaid';
     if (data.paymentMethod) updates.payment_method = data.paymentMethod;
     if (data.completedAt) updates.completed_at = new Date(data.completedAt).toISOString();
-    
-    // Jika ada update items (misal split bill), logic-nya lebih kompleks (delete all items -> re-insert),
-    // Untuk simplifikasi di sini kita hanya update status/payment header.
     
     if (Object.keys(updates).length > 0) {
         updates.updated_at = new Date().toISOString();
@@ -182,41 +299,34 @@ export const updateOrderInCloud = async (orderId: string, data: Partial<Order>) 
     }
 };
 
-// --- ATTENDANCE ---
+// ==========================================
+// 6. ATTENDANCE
+// ==========================================
 
 export const subscribeToAttendance = (branchId: string, onUpdate: (data: AttendanceRecord[]) => void) => {
-    const fetchAttendance = async () => {
-        const { data } = await supabase
-            .from('attendance')
-            .select('*')
-            .eq('branch_id', branchId)
-            .order('clock_in', { ascending: false })
-            .limit(50);
-            
+    const fetch = async () => {
+        const { data } = await supabase.from('attendance').select('*').eq('branch_id', branchId).order('clock_in', { ascending: false });
         if (data) {
-            const mapped = data.map((r: any) => ({
+            onUpdate(data.map((r: any) => ({
                 id: r.id,
                 userId: r.user_id,
                 userName: r.user_name,
                 branchId: r.branch_id,
                 date: r.date,
-                clockInTime: r.clock_in, // BigInt/Number di DB Supabase
+                clockInTime: r.clock_in,
                 clockOutTime: r.clock_out,
                 status: r.status,
                 photoUrl: r.photo_url,
                 location: r.lat ? { lat: r.lat, lng: r.lng } : undefined
-            }));
-            onUpdate(mapped);
+            })));
         }
     };
-
-    fetchAttendance();
-    // Bisa tambahkan realtime subscription juga jika perlu
+    fetch();
     return () => {};
 };
 
 export const addAttendanceToCloud = async (record: AttendanceRecord) => {
-    const payload = {
+    await supabase.from('attendance').insert({
         id: record.id,
         user_id: record.userId,
         user_name: record.userName,
@@ -227,56 +337,16 @@ export const addAttendanceToCloud = async (record: AttendanceRecord) => {
         photo_url: record.photoUrl,
         lat: record.location?.lat,
         lng: record.location?.lng
-    };
-    
-    await supabase.from('attendance').insert(payload);
+    });
 };
 
 export const updateAttendanceInCloud = async (id: string, data: Partial<AttendanceRecord>, branchId: string) => {
-    const updates: any = {};
-    if (data.clockOutTime) updates.clock_out = data.clockOutTime;
-    if (data.status) updates.status = data.status;
-    
-    await supabase.from('attendance').update(updates).eq('id', id);
+    await supabase.from('attendance').update({
+        clock_out: data.clockOutTime,
+        status: data.status
+    }).eq('id', id);
 };
 
-// --- MASTER DATA (Menu, Categories, etc) ---
-// Dalam skema SQL yang kita buat, produk ada di tabel 'products'.
-// Fungsi ini akan mengambil dari tabel real, bukan JSON dump.
-
-export const subscribeToMasterData = (branchId: string, type: 'menu' | 'categories' | 'profile' | 'ingredients', onUpdate: (data: any) => void) => {
-    const fetchData = async () => {
-        if (type === 'menu') {
-            const { data } = await supabase.from('products').select('*').eq('is_active', true);
-            if (data) {
-                // Map snake_case to CamelCase MenuItem
-                const menuItems: MenuItem[] = data.map((p: any) => ({
-                    id: p.id,
-                    name: p.name,
-                    price: p.price,
-                    category: 'Umum', // Perlu join category sebenarnya, hardcode sementara atau fetch join
-                    imageUrl: p.image_url,
-                    stock: p.stock,
-                    minStock: p.min_stock
-                }));
-                // Note: Kategori di tabel terpisah, untuk simplifikasi kita trigger update tapi datanya mungkin perlu join
-                // Karena frontend mengharapkan struktur lengkap, jika SQL belum di-join, 
-                // kita biarkan frontend pakai data default/lokal dulu untuk Master Data agar tidak blank.
-                // onUpdate(menuItems); 
-            }
-        }
-        // Logic fetch Category, Profile, Ingredients serupa...
-    };
-
-    // fetchData();
-    // Return unsubscribe empty agar tidak error, sementara Master Data kita biarkan Local Storage 
-    // agar Admin bisa edit-edit tanpa coding backend kompleks untuk CRUD Master Data.
-    return () => {};
-};
-
-export const syncMasterData = async (branchId: string, type: string, data: any) => {
-    // Fungsi ini biasanya menyimpan JSON besar ke Firebase.
-    // Di SQL, kita harus memecahnya menjadi baris-baris tabel.
-    // Untuk saat ini kita matikan agar tidak error saat admin mengedit menu di frontend.
-    console.log("Sync Master Data (Skipped for SQL migration):", type);
-};
+// Legacy stubs to prevent errors if still called
+export const subscribeToMasterData = (branchId: string, type: string, cb: any) => { return () => {} };
+export const syncMasterData = async () => {};
